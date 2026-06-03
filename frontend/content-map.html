@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Content Map — The Dirk</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #f7f3ee;
+      color: #2a2030;
+      font-family: 'Inter', sans-serif;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #contentMapView { width: 100%; height: 100%; display: flex; flex-direction: column; }
+
+    .main__header {
+      padding: 20px 32px 12px;
+      text-align: center;
+      background: linear-gradient(to bottom, #f7f3ee 70%, transparent);
+      z-index: 10;
+      position: relative;
+    }
+    .main__header h1 {
+      font-size: 22px; font-weight: 700; letter-spacing: -0.5px;
+      background: linear-gradient(135deg, #7c5cbf, #a78bfa);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .main__header p { font-size: 12px; color: #6b5f75; margin-top: 2px; font-family: 'JetBrains Mono', monospace; }
+
+    #mapContainer { flex: 1; position: relative; overflow: hidden; }
+    #mapCanvas { display: block; width: 100%; height: 100%; }
+
+    .legend {
+      position: absolute; bottom: 20px; left: 20px;
+      display: flex; flex-direction: column; gap: 6px; z-index: 10;
+      background: rgba(247,243,238,0.92);
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: 1px solid rgba(42,32,48,0.12);
+      box-shadow: 0 4px 16px rgba(42,32,48,0.08);
+    }
+    .legend-item { display: flex; align-items: center; gap: 10px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #6b5f75; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .legend-count { color: #a0999f; margin-left: auto; padding-left: 12px; }
+
+    .stats {
+      position: absolute; bottom: 20px; right: 20px;
+      font-family: 'JetBrains Mono', monospace; font-size: 11px;
+      color: #6b5f75; z-index: 10;
+      background: rgba(247,243,238,0.92);
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid rgba(42,32,48,0.12);
+      box-shadow: 0 4px 16px rgba(42,32,48,0.08);
+      line-height: 1.6;
+    }
+    .stats span { color: #7c5cbf; font-weight: 600; }
+
+    #tooltip {
+      position: absolute; display: none;
+      background: rgba(247,243,238,0.96);
+      border: 1px solid rgba(124,92,191,0.25);
+      border-radius: 10px; padding: 10px 14px;
+      pointer-events: none; z-index: 100;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 8px 32px rgba(42,32,48,0.12);
+      max-width: 260px;
+    }
+    #tooltip.visible { display: block; }
+    #tooltip .tt-title { font-size: 14px; font-weight: 600; color: #2a2030; margin-bottom: 4px; line-height: 1.3; }
+    #tooltip .tt-meta { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #6b5f75; display: flex; gap: 10px; align-items: center; }
+    #tooltip .tt-cat { padding: 2px 7px; border-radius: 20px; font-size: 10px; font-weight: 600; }
+    #tooltip .tt-link { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #7c5cbf; display: inline-block; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <div id="contentMapView" class="view-panel">
+    <header class="main__header">
+      <h1>Themen-Landkarte</h1>
+      <p id="mapSubtitle">Dein Content — stabil sortiert</p>
+    </header>
+    <div id="mapContainer">
+      <canvas id="mapCanvas"></canvas>
+      <div class="legend" id="legend"></div>
+      <div class="stats" id="stats"></div>
+      <div id="tooltip">
+        <div class="tt-title" id="ttTitle"></div>
+        <div class="tt-meta">
+          <span id="ttViews"></span>
+          <span class="tt-cat" id="ttCat"></span>
+        </div>
+        <a class="tt-link" id="ttLink" href="#" target="_blank">▶ Auf YouTube →</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ─── CATEGORY CONFIG ──────────────────────────────────────────────
+    const CATS = {
+      'Gaming':     { fill: '#e05565', glow: 'rgba(224,85,101,0.25)',  cx: 0.25, cy: 0.45, label: 'GAMING' },
+      'Tutorial':   { fill: '#4a90d9', glow: 'rgba(74,144,217,0.25)',  cx: 0.72, cy: 0.80, label: 'TUTORIALS' },
+      'Nostalgie': { fill: '#e87c3e', glow: 'rgba(232,124,62,0.25)', cx: 0.50, cy: 0.12, label: 'NOSTALGIE' },
+      'Experiment':{ fill: '#9b6dff', glow: 'rgba(155,109,255,0.25)', cx: 0.72, cy: 0.30, label: 'EXPERIMENT' },
+      'Review':    { fill: '#3eb8a0', glow: 'rgba(62,184,160,0.25)', cx: 0.25, cy: 0.78, label: 'REVIEW' }
+    };
+
+    // ─── CATEGORIZE ────────────────────────────────────────────────────
+    function categorize(title) {
+      const t = (title || '').toLowerCase();
+      if (/\b(tutorial|setup|installieren|anleitung|linux.?mint|cachyos|basics|essentials|steam.?setup|installation)\b/.test(t)) return 'Tutorial';
+      if (/\b(retro|nerd|old|kult|klassiker|hd.?edition|old.?games|dosbox|retro.?gaming|homeworld|mechwarrior)\b/.test(t)) return 'Nostalgie';
+      if (/\b(test|experiment|review|testbericht|die.?besten|vergleich)\b/.test(t)) return 'Experiment';
+      if (/\b(game|spiel|gaming|gamer|steam|wow|star.?citizen|freelancer|scum|7.?days|drakan|omikron|sacred|gaming.?journalist)\b/.test(t)) return 'Gaming';
+      return 'Gaming';
+    }
+
+    // Deterministic view mock from title hash (stable per video)
+    function mockViews(title) {
+      let hash = 0;
+      for (let i = 0; i < (title||'').length; i++) {
+        hash = ((hash << 5) - hash) + (title||'').charCodeAt(i);
+        hash = hash & hash;
+      }
+      return Math.abs(hash % 48000) + 200;
+    }
+
+    // ─── LAYOUT ENGINE ─────────────────────────────────────────────────
+    // Positions are pre-computed, NO physics, NO animation settling
+    function computeLayout(videos, W, H) {
+      const catBlobs = {};
+      for (const v of videos) {
+        const cat = v.category;
+        if (!catBlobs[cat]) catBlobs[cat] = [];
+        catBlobs[cat].push(v);
+      }
+
+      for (const [cat, cfg] of Object.entries(CATS)) {
+        const blobs = catBlobs[cat] || [];
+        if (blobs.length === 0) continue;
+
+        // Sort by views descending for sizing
+        blobs.sort((a, b) => b.views - a.views);
+        const cx = cfg.cx * W;
+        const cy = cfg.cy * H;
+
+        // Max blob radius = 40px (smaller), scales with relative view count
+        const MAX_R = 40;
+        const CENTER_R = Math.min(MAX_R, 18 + blobs[0].views / 350);
+
+        if (blobs.length === 1) {
+          blobs[0].px = cx; blobs[0].py = cy;
+          blobs[0].radius = CENTER_R;
+        } else {
+          // Spiral layout: blobs spread outward in a spiral, no overlaps
+          blobs[0].px = cx; blobs[0].py = cy;
+          blobs[0].radius = CENTER_R;
+
+          const TOTAL_BLOBS = blobs.length - 1;
+          const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5)); // Fibonacci spiral
+          const MAX_SPIRAL_RADIUS = Math.min(W, H) * 0.30;
+          
+          for (let i = 0; i < TOTAL_BLOBS; i++) {
+            const blob = blobs[i + 1];
+            // Spiral outward: each blob placed at increasing radius
+            const r = MAX_SPIRAL_RADIUS * Math.sqrt((i + 1) / TOTAL_BLOBS) * 0.85;
+            const angle = (i + 1) * GOLDEN_ANGLE;
+            
+            blob.px = cx + Math.cos(angle) * r;
+            blob.py = cy + Math.sin(angle) * r;
+            // Scale radius proportionally to max views in this category (smaller max)
+            blob.radius = Math.max(10, (blob.views / blobs[0].views) * CENTER_R);
+          }
+        }
+      }
+
+      return videos;
+    }
+
+    // ─── CANVAS SETUP ─────────────────────────────────────────────────
+    const canvas = document.getElementById('mapCanvas');
+    const ctx = canvas.getContext('2d');
+    let W, H, blobs = [];
+
+    function resize() {
+      const c = document.getElementById('mapContainer');
+      W = canvas.width  = c.clientWidth;
+      H = canvas.height = c.clientHeight;
+    }
+
+    // ─── DRAW ──────────────────────────────────────────────────────────
+    function drawGrid() {
+      ctx.save();
+      ctx.fillStyle = 'rgba(42,32,48,0.05)';
+      const g = 50;
+      for (let x = g; x < W; x += g)
+        for (let y = g; y < H; y += g) {
+          ctx.beginPath();
+          ctx.arc(x, y, 1.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      ctx.restore();
+    }
+
+    function drawCategoryZone(cat, cfg) {
+      ctx.save();
+      ctx.globalAlpha = 0.06;
+      ctx.fillStyle = cfg.fill;
+      const rx = cfg.cx * W;
+      const ry = cfg.cy * H;
+      const radius = Math.min(W, H) * 0.26;
+      const grad = ctx.createRadialGradient(rx, ry, 0, rx, ry, radius);
+      grad.addColorStop(0, cfg.fill);
+      grad.addColorStop(1, 'transparent');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+
+      // Zone label
+      ctx.save();
+      ctx.font = '500 10px JetBrains Mono';
+      ctx.fillStyle = cfg.fill;
+      ctx.globalAlpha = 0.45;
+      ctx.textAlign = 'center';
+      ctx.fillText(cfg.label, cfg.cx * W, (cfg.cy - 0.20) * H);
+      ctx.restore();
+    }
+
+    function drawBlob(b, hovered) {
+      const cfg = CATS[b.category] || { fill: '#888', glow: 'rgba(136,136,136,0.3)' };
+      const r = b.radius;
+
+      ctx.save();
+
+      // Outer glow
+      const glowR = hovered ? 24 : 12;
+      const grad = ctx.createRadialGradient(b.px, b.py, r * 0.5, b.px, b.py, r + glowR);
+      grad.addColorStop(0, cfg.glow);
+      grad.addColorStop(1, 'transparent');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(b.px, b.py, r + glowR, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Main circle
+      ctx.shadowColor = cfg.fill;
+      ctx.shadowBlur = hovered ? 18 : 6;
+      ctx.beginPath();
+      ctx.arc(b.px, b.py, r, 0, Math.PI * 2);
+      ctx.fillStyle = cfg.fill + '22';
+      ctx.fill();
+      ctx.strokeStyle = cfg.fill + (hovered ? 'ff' : '99');
+      ctx.lineWidth = hovered ? 2 : 1.5;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Inner highlight
+      const hl = ctx.createRadialGradient(b.px - r*0.3, b.py - r*0.3, 0, b.px, b.py, r);
+      hl.addColorStop(0, 'rgba(255,255,255,0.08)');
+      hl.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.beginPath();
+      ctx.arc(b.px, b.py, r - 0.5, 0, Math.PI * 2);
+      ctx.fillStyle = hl;
+      ctx.fill();
+
+      // Title
+      ctx.fillStyle = '#2a2030';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      let title = b.title;
+      const maxW = r * 1.8;
+      ctx.font = `600 ${Math.min(11, r * 0.32)}px Inter`;
+      while (ctx.measureText(title).width > maxW && title.length > 4)
+        title = title.slice(0, -4) + '…';
+      ctx.shadowColor = 'rgba(247,243,238,0.95)';
+      ctx.shadowBlur = 4;
+      ctx.fillText(title, b.px, b.py - (r > 25 ? 2 : 0));
+
+      // Views
+      if (r > 22) {
+        ctx.font = `${Math.min(9, r * 0.23)}px JetBrains Mono`;
+        ctx.fillStyle = '#6b5f75';
+        ctx.shadowBlur = 2;
+        ctx.fillText(formatV(b.views), b.px, b.py + r * 0.38);
+      }
+
+      ctx.restore();
+    }
+
+    function formatV(n) {
+      if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'K';
+      return n + '';
+    }
+
+    function drawAll(hoveredId) {
+      ctx.clearRect(0, 0, W, H);
+      drawGrid();
+      for (const cat of Object.keys(CATS)) drawCategoryZone(cat, CATS[cat]);
+      for (const b of blobs) drawBlob(b, b.id === hoveredId);
+    }
+
+    // ─── HOVER ─────────────────────────────────────────────────────────
+    let hoveredBlob = null;
+    const tooltip = document.getElementById('tooltip');
+
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      let found = null;
+      for (const b of blobs) {
+        const d = Math.hypot(mx - b.px, my - b.py);
+        if (d < b.radius) { found = b; break; }
+      }
+      hoveredBlob = found;
+      canvas.style.cursor = found ? 'pointer' : 'default';
+      if (found) {
+        document.getElementById('ttTitle').textContent = found.title;
+        document.getElementById('ttViews').textContent = formatV(found.views) + ' Views';
+        const catEl = document.getElementById('ttCat');
+        const cfg = CATS[found.category] || { fill: '#888' };
+        catEl.textContent = found.category;
+        catEl.style.background = cfg.fill + '22';
+        catEl.style.color = cfg.fill;
+        catEl.style.border = `1px solid ${cfg.fill}44`;
+        document.getElementById('ttLink').href = found.url;
+        tooltip.style.left = (e.clientX - rect.left + 15) + 'px';
+        tooltip.style.top  = (e.clientY - rect.top  - 10) + 'px';
+        tooltip.classList.add('visible');
+      } else {
+        tooltip.classList.remove('visible');
+      }
+      drawAll(hoveredBlob?.id);
+    });
+
+    canvas.addEventListener('click', () => {
+      if (hoveredBlob) window.open(hoveredBlob.url, '_blank');
+    });
+
+    // ─── MAIN INIT ─────────────────────────────────────────────────────
+    async function init() {
+      resize();
+      window.addEventListener('resize', () => {
+        resize();
+        blobs = computeLayout(blobs, W, H);
+        drawAll(null);
+      });
+
+      // Fetch videos
+      let videos = [];
+      try {
+        const res = await fetch('/api/videos');
+        if (res.ok) videos = await res.json();
+      } catch(e) { console.error(e); }
+
+      if (videos.length === 0) {
+        document.getElementById('mapSubtitle').textContent = 'Keine Videos gefunden';
+        return;
+      }
+
+      blobs = videos.map(v => ({
+        id: v.id,
+        title: v.title || 'Ohne Titel',
+        views: mockViews(v.title || ''),
+        category: categorize(v.title || ''),
+        url: v.youtube_url || (v.video_id ? 'https://youtube.com/watch?v=' + v.video_id : '#'),
+        video_format: v.video_format,
+        status: v.status
+      }));
+
+      blobs = computeLayout(blobs, W, H);
+
+      // Build legend
+      const catCounts = {};
+      for (const b of blobs) catCounts[b.category] = (catCounts[b.category] || 0) + 1;
+      const legend = document.getElementById('legend');
+      legend.innerHTML = '';
+      for (const [cat, cfg] of Object.entries(CATS)) {
+        if (!catCounts[cat]) continue;
+        const item = document.createElement('div');
+        item.className = 'legend-item';
+        item.innerHTML = `<div class="legend-dot" style="background:${cfg.fill}"></div><span>${cfg.label}</span><span class="legend-count">${catCounts[cat]}</span>`;
+        legend.appendChild(item);
+      }
+
+      // Build stats
+      const totalViews = blobs.reduce((s, b) => s + b.views, 0);
+      const catStats = {};
+      for (const b of blobs) {
+        if (!catStats[b.category]) catStats[b.category] = { count: 0, views: 0 };
+        catStats[b.category].count++;
+        catStats[b.category].views += b.views;
+      }
+      document.getElementById('stats').innerHTML =
+        `<div><span>${blobs.length}</span> Videos</div>` +
+        `<div><span>${formatV(totalViews)}</span> kumulierte Views</div>` +
+        `<div><span>${Object.keys(catStats).length}</span> Kategorien</div>`;
+
+      document.getElementById('mapSubtitle').textContent =
+        `${blobs.length} Videos • ${formatV(totalViews)} Views •分布`;
+
+      drawAll(null);
+    }
+
+    init();
+  </script>
+</body>
+</html>

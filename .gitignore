@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Environment (contains API keys)
+.env
+
+# Local database
+contentix.db
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor directories
+.vscode/
+.idea/
+*.swp
+*.swo
+# Backup files
+*.bak
+*.backup
+
+# Prototype/exploration files
+frontend/*-prototype.html
+
+# Old/one-off scripts (kept locally, not in repo)
+add-msfs-script.js
+insert-msfs.js
+msfs-linux-update.js

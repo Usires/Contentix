@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contentix — Kreativ-Kompass</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  
+  <!-- Styles -->
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="kanban.css">
+  <link rel="stylesheet" href="calendar.css">
+  
+  <!-- Dependencies -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.16/themes/default/style.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.16/jstree.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  
+  <!-- Favicon -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📺</text></svg>">
+</head>
+<body>
+  <div class="contentix-app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar__logo">Content<span>ix</span></div>
+      <p class="sidebar__tagline">Dein kreativer Kompass für YouTube</p>
+
+      <div class="sidebar__section">
+        <p class="sidebar__channel-name">🎬 The Dirk</p>
+        <p class="sidebar__section-title">Navigation</p>
+        <ul class="sidebar__nav">
+          <li class="sidebar__nav-item">
+            <a href="#" class="sidebar__nav-link active" data-view="bibliothek">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+              Bibliothek
+            </a>
+          </li>
+          <li class="sidebar__nav-item">
+            <a href="#" class="sidebar__nav-link" data-view="ideas">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.07 7.07l-1.93-1.93a5 5 0 01-7.072-7.072l1.93 1.93z"/></svg>
+              Workflow
+            </a>
+          </li>
+          <li class="sidebar__nav-item">
+            <a href="#" class="sidebar__nav-link" data-view="calendar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+              Kalender
+            </a>
+          </li>
+          <li class="sidebar__nav-item">
+            <a href="#" class="sidebar__nav-link" data-view="scripts">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+              Skripte
+            </a>
+          </li>
+          <li class="sidebar__nav-item">
+            <a href="#" class="sidebar__nav-link" data-view="settings">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+              Einstellungen
+            </a>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Stats Badges -->
+      <div class="sidebar__stats">
+        <div class="sidebar__stat">
+          <span class="sidebar__stat-val" id="logbuchSubs">—</span>
+          <span class="sidebar__stat-label">🚀 Abonnenten</span>
+        </div>
+        <div class="sidebar__stat">
+          <span class="sidebar__stat-val" id="logbuchViews">—</span>
+          <span class="sidebar__stat-label">👁 Aufrufe</span>
+        </div>
+        <div class="sidebar__stat">
+          <span class="sidebar__stat-val" id="logbuchWatchtime">—</span>
+          <span class="sidebar__stat-label">⏱ Watchtime</span>
+        </div>
+        <div class="sidebar__stat">
+          <span class="sidebar__stat-val" id="logbuchVideos">—</span>
+          <span class="sidebar__stat-label">📅 Videos</span>
+        </div>
+      </div>
+
+      <!-- Nächstes Video Widget -->
+      <div class="next-video-widget" id="nextVideoWidget">
+        <div class="next-video-widget__label">🎯 Nächstes Video</div>
+        <div class="next-video-widget__title" id="nextVideoTitle">—</div>
+        <div class="next-video-widget__meta" id="nextVideoMeta">—</div>
+      </div>
+
+      <!-- vidIQ Refresh Button + Status -->
+      <div id="vidiqRefreshWrap">
+        <button id="vidiqRefreshBtn" class="sidebar__refresh-btn">
+          ⟳ vidIQ Refresh
+        </button>
+        <div id="vidiqRefreshStatus" class="vidiq-refresh-status"></div>
+      </div>
+
+      <!-- Footer -->
+      <div class="sidebar__footer">
+        <span id="sidebarVersion">v0.9.1</span>
+        <span class="sidebar__footer-sep">·</span>
+        <span>© 2026 Nix & Dirk</span>
+      </div>
+    </aside>
+
+        <div class="main">
+
+      <!-- ===================== IDEAS VIEW (Kanban) ===================== -->
+      <div id="ideasView" class="view-panel" style="display: none;">
+        <div id="kanbanBoard" class="board"></div>
+      </div>
+
+
+      <div id="bibliothekView" class="view-panel" style="display: none;">
+        <div class="bibliothek-header" style="padding: 32px 32px 24px; border-bottom: 1px solid var(--border-subtle);">
+          <h1 style="font-size: 24px; font-weight: 700; letter-spacing: -0.5px;">Bibliothek</h1>
+          <p class="bibliothek-subtitle">Lädt...</p>
+        </div>
+        <div style="padding: 24px 32px;">
+          <div class="lib-grid">
+            <div class="lib-col">
+              <div class="lib-col-header">
+                <h2>Neueste Videos</h2>
+                <span class="badge" id="newestCount">—</span>
+              </div>
+              <div class="video-list" id="newestList">
+                <div class="bibliothek-empty">Lade neueste Videos...</div>
+              </div>
+            </div>
+            <div class="lib-col">
+              <div class="lib-col-header">
+                <h2>Meistgesehen</h2>
+                <span class="badge" id="topCount">—</span>
+              </div>
+              <div class="video-list" id="topList">
+                <div class="bibliothek-empty">Lade Top-Videos...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="contentView" class="view-panel" style="display: none;">
+        <header class="main__header">
+          <h1 class="main__title">Expeditionen</h1>
+          <p class="main__subtitle">vidIQ Daten für deinen Kanal.</p>
+        </header>
+        
+        <!-- Latest Video Widget -->
+        <div class="latest-video" id="latestVideoWidget">
+          <div class="latest-video__thumb" id="latestVideoThumb">🎬</div>
+          <div class="latest-video__info">
+            <div class="latest-video__label">Neuestes Video</div>
+            <div class="latest-video__title" id="latestVideoTitle">⏳ Lade...</div>
+            <a class="latest-video__link" id="latestVideoLink" href="#" target="_blank">▶ Auf YouTube</a>
+          </div>
+        </div>
+        
+        <!-- Channel Stats -->
+        <div class="channel-stats" id="channelStats">
+          <div class="channel-stats__item"><span class="val" id="stat-subs">—</span><span class="label">Subs</span></div>
+          <div class="channel-stats__item"><span class="val" id="stat-views">—</span><span class="label">Views</span></div>
+          <div class="channel-stats__item"><span class="val" id="stat-watchtime">—</span><span class="label">Std. Watchtime</span></div>
+        </div>
+        
+        <div id="contentGrid" class="content-grid">
+          <div class="loading">
+            <div class="loading__spinner"></div>
+            <p class="loading__text">Daten werden geladen...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CALENDAR VIEW ===================== -->
+      <div id="calendarView" class="view-panel" style="display: none;">
+        <div id="calendarContent"></div>
+      </div>
+
+      <!-- ===================== SETTINGS VIEW ===================== -->
+      <div id="scriptsView" class="view-panel" style="display: none;">
+        <div id="scriptsContainer"></div>
+      </div>
+
+      <div id="settingsView" class="view-panel" style="display: none;">
+        <header class="main__header">
+          <h1 class="main__title">⚙️ Einstellungen</h1>
+          <p class="main__subtitle">API-Keys und Konfiguration.</p>
+        </header>
+        <div class="settings-panel">
+          <div class="content-card">
+            <h3>🎨 Farbthema</h3>
+            <p>
+              Wähle ein Farbset passend zur Jahreszeit oder deiner Stimmung.
+            </p>
+            <div class="settings-theme-grid">
+              <button class="theme-btn" data-theme="" onclick="setTheme('')">
+                <div class="theme-btn__name">🟣 Nix Violet (Default)</div>
+                <div class="theme-btn__desc">Warm, kreativ, timeless</div>
+              </button>
+              <button class="theme-btn" data-theme="spring" onclick="setTheme('spring')">
+                <div class="theme-btn__name">🌸 Frühling</div>
+                <div class="theme-btn__desc">Sanft, frisch, aufwachsend</div>
+              </button>
+              <button class="theme-btn" data-theme="summer" onclick="setTheme('summer')">
+                <div class="theme-btn__name">☀️ Sommer</div>
+                <div class="theme-btn__desc">Sonnig, warm, leuchtend</div>
+              </button>
+              <button class="theme-btn" data-theme="autumn" onclick="setTheme('autumn')">
+                <div class="theme-btn__name">🍂 Herbst</div>
+                <div class="theme-btn__desc">Warm, golden, gemütlich</div>
+              </button>
+              <button class="theme-btn" data-theme="winter" onclick="setTheme('winter')">
+                <div class="theme-btn__name">❄️ Winter</div>
+                <div class="theme-btn__desc">Kühl, elegant, festlich</div>
+              </button>
+            </div>
+          </div>
+
+          <div class="content-card">
+            <h3>vidIQ API Key</h3>
+            <p>
+              Dein vidIQ API Key wird in der <code>.env</code> Datei verwaltet.
+            </p>
+            <code style="font-size: 12px; background: var(--lavender-light); padding: 4px 8px; border-radius: 4px;">
+              VIDIQ_API_KEY=dein_key_hier
+            </code>
+          </div>
+        </div>
+      </div>
+
+  </div>
+
+  <!-- Card Editor Modal -->
+  <div class="kanban-modal" id="kanbanModal" style="display: none;">
+    <div class="kanban-modal__backdrop"></div>
+    <div class="kanban-modal__box">
+      <button class="kanban-modal__close" id="kanbanModalClose">×</button>
+      <h2 class="kanban-modal__title" id="kanbanModalTitle">Content-Details</h2>
+      
+      <form id="kanbanForm">
+        <input type="hidden" name="id">
+        <input type="hidden" name="status" id="formStatus">
+        
+        <div class="form-group">
+          <label>Status</label>
+          <div class="status-pipeline" id="statusPipeline">
+            <div class="status-pipeline__step status-pipeline__step--1" data-step="ideas">
+              <div class="status-pipeline__dot"></div>
+              <div class="status-pipeline__label">Ideen</div>
+            </div>
+            <div class="status-pipeline__step status-pipeline__step--2" data-step="research">
+              <div class="status-pipeline__dot"></div>
+              <div class="status-pipeline__label">Recherche</div>
+            </div>
+            <div class="status-pipeline__step status-pipeline__step--3" data-step="skript">
+              <div class="status-pipeline__dot"></div>
+              <div class="status-pipeline__label">Skript</div>
+            </div>
+            <div class="status-pipeline__step status-pipeline__step--4" data-step="recording">
+              <div class="status-pipeline__dot"></div>
+              <div class="status-pipeline__label">Recording</div>
+            </div>
+            <div class="status-pipeline__step status-pipeline__step--5" data-step="uploaded">
+              <div class="status-pipeline__dot"></div>
+              <div class="status-pipeline__label">Hochgeladen</div>
+            </div>
+          </div>
+          <div class="status-pipeline__bar" id="statusPipelineBar">
+            <div class="status-pipeline__bar-fill" id="statusPipelineBarFill"></div>
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label>Titel</label>
+          <input type="text" name="title" required placeholder="Worum geht's in dem Video?">
+        </div>
+        <div class="form-group">
+          <label>Tags (kommagetrennt)</label>
+          <input type="text" name="tags" placeholder="linux, tutorial, TIP">
+        </div>
+        <div class="form-group">
+          <label>Notizen</label>
+          <textarea name="notes" rows="4" placeholder="Erste Gedanken, Stichpunkte, Ideen..."></textarea>
+        </div>
+        <div class="form-group form-group--row">
+          <div class="form-group__half">
+            <label>Geplant Datum</label>
+            <input type="date" name="planned_date" placeholder="YYYY-MM-DD">
+          </div>
+          <div class="form-group__half">
+            <label>Uhrzeit</label>
+            <input type="time" name="planned_time" placeholder="HH:MM">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>YouTube URL</label>
+          <input type="url" name="youtube_url" placeholder="https://youtube.com/watch?v=...">
+        </div>
+        <div class="form-group" id="scriptLinkGroup" style="display:none">
+          <label>Verlinktes Skript</label>
+          <div id="scriptLinkInfo" class="script-link-info"></div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn--danger" id="kanbanDeleteBtn" style="display:none" onclick="deleteFromModal()">Löschen</button>
+          <div style="flex:1"></div>
+          <button type="button" class="btn btn--secondary" id="kanbanCancel">Abbrechen</button>
+          <button type="submit" class="btn btn--primary">💾 Speichern</button>
+        </div>
+      </form>
+    </div>
+
+    </div>
+  </div>
+
+  <!-- App JS -->
+  <script src="store.js"></script>
+  <script src="utils.js"></script>
+  <script src="bibliothek.js"></script>
+  <script src="app.js"></script>
+  <script src="scripts.js"></script>
+  <script src="kanban.js"></script>
+  <script src="calendar.js"></script>
+  <script src="effects.js"></script>
+  <div class="kanban-toast" id="kanbanToast"></div>
+</body>
+</html>

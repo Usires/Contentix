@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  contentix:
+    image: node:20-alpine
+    container_name: contentix-backend
+    working_dir: /app
+    volumes:
+      - ./contentix.db:/app/contentix.db
+      - ./index.js:/app/index.js
+      - ./database.js:/app/database.js
+    ports:
+      - "3038:3038"
+    environment:
+      - NODE_ENV=production
+      - PORT=3038
+      - VIDIQ_API_KEY=vidIQ_3cWiT8DetUJwhAZLRrhu05dql4WeB57va5Pame6Z
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3038/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - internal
+
+networks:
+  internal:
+    external: false
