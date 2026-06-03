@@ -937,6 +937,11 @@ body.modal-open {
   animation: pulse-widget 3s ease-in-out 10;
 }
 
+/* Extra space when the widget sits right under the channel name (top of action zone) */
+.sidebar__channel-name + .next-video-widget {
+  margin-top: 16px;
+}
+
 @keyframes pulse-widget {
   0%, 100% {
     box-shadow: 0 0 0 0 rgba(255, 107, 107, 0);
