@@ -14,6 +14,7 @@
   --text-secondary: #6b5f75;       /* Gedämpftes Lavender */
   --text-muted:     #9b8fa8;       /* Helles Lavender */
   --text-on-dark:   #f0eaf0;       /* Helles auf dunklem Hintergrund */
+  --text-on-dark-secondary: #b9b1bc; /* Sekundärer Text auf dunklem Hintergrund */
 
   --nix-violet:     #7c5cbf;       /* Mein Akzent — lebendig aber nicht aufdringlich */
   --nix-violet-dim: #5a3d9e;      /* Gedämpfter für Hover */
@@ -54,6 +55,7 @@ body.theme-spring {
   --text-secondary: #5a7058;
   --text-muted:     #8aa898;
   --text-on-dark:   #e0f0e5;
+  --text-on-dark-secondary: #aebba9;
   --nix-violet:     #7ab55c;       /* frisches Grün statt Flieder */
   --nix-violet-dim: #5a9a3a;
   --nix-glow:       rgba(122, 181, 92, 0.2);
@@ -78,6 +80,7 @@ body.theme-summer {
   --text-secondary: #6a5a3a;
   --text-muted:     #9a8a5a;
   --text-on-dark:   #f5f0e0;
+  --text-on-dark-secondary: #bab29e;
   --nix-violet:     #c47d3a;       /* warmes Orange-Gold statt rosa */
   --nix-violet-dim: #a05a20;
   --nix-glow:       rgba(196, 125, 58, 0.2);
@@ -102,6 +105,7 @@ body.theme-autumn {
   --text-secondary: #7a5040;
   --text-muted:     #a08070;
   --text-on-dark:   #f0e8e0;
+  --text-on-dark-secondary: #b4ada3;
   --nix-violet:     #c47a3a;       /* warmes Orange statt Rostlila */
   --nix-violet-dim: #a05a20;
   --nix-glow:       rgba(196, 122, 58, 0.2);
@@ -126,6 +130,7 @@ body.theme-winter {
   --text-secondary: #4a4a70;
   --text-muted:     #7a7a9a;
   --text-on-dark:   #e0e4f5;
+  --text-on-dark-secondary: #a8aebe;
   --nix-violet:     #5a8fc4;       /* kühles Blau statt Violett */
   --nix-violet-dim: #3a6da4;
   --nix-glow:       rgba(90, 143, 196, 0.2);
@@ -219,7 +224,7 @@ body.modal-open {
 
 .sidebar__tagline {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-on-dark-secondary);
   font-style: normal;
   opacity: 0.9;
 }
@@ -1158,12 +1163,12 @@ body.modal-open {
 
 .vidiq-refresh-status {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--text-on-dark-secondary);
   min-height: 16px;
   margin-top: 4px;
   text-align: center;
   font-family: 'JetBrains Mono', monospace;
-  opacity: 0.85;
+  opacity: 0.95;
 }
 .vidiq-refresh-status--loading { color: var(--accent); }
 .vidiq-refresh-status--error { color: #e87a7a; }
@@ -1272,11 +1277,11 @@ body.modal-open {
   margin-top: auto;
   padding-top: 24px;
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--text-on-dark-secondary);
   display: flex;
   align-items: center;
   gap: 8px;
-  opacity: 0.85;
+  opacity: 1;
 }
 .sidebar__footer-sep {
   opacity: 0.5;
@@ -1314,9 +1319,9 @@ body.modal-open {
 }
 .sidebar__stat-label {
   font-size: 10px;
-  color: var(--text-secondary);
+  color: var(--text-on-dark-secondary);
   text-align: center;
-  opacity: 0.85;
+  opacity: 1;
 }
 
 #thememapView {
