@@ -571,9 +571,231 @@ async function loadNixComment() {
 
 // ─── Keyboard Shortcuts ─────────────────────────────────────────────────────
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { closeModal(); closeCardModal(); closeCalendarDayDetail && closeCalendarDayDetail(); }
-  if (e.key === 'n' && (e.metaKey || e.ctrlKey)) {
+  // Escape always works, everywhere — closes whatever is open
+  if (e.key === 'Escape') {
+    if (isPaletteOpen()) { closeCommandPalette(); return; }
+    if (isShortcutsHelpOpen()) { hideShortcutsHelp(); return; }
+    closeModal(); closeCardModal();
+    if (typeof closeCalendarDayDetail === 'function') closeCalendarDayDetail();
+    return;
+  }
+
+  // Cmd/Ctrl combos work in inputs too (they're explicit user intent)
+  if (e.metaKey || e.ctrlKey) {
+    if (e.key === 'k' || e.key === 'K') {
+      e.preventDefault();
+      openCommandPalette();
+      return;
+    }
+    if (e.key === 's' || e.key === 'S') {
+      // Only intercept when a modal is open
+      if (isCardModalOpen() || isModalOpen()) {
+        e.preventDefault();
+        const form = document.querySelector('#kanbanModal form, #contentModal form');
+        if (form) form.requestSubmit ? form.requestSubmit() : form.submit();
+      }
+      return;
+    }
+    if (e.key === 'n') {
+      e.preventDefault();
+      openModal();
+      return;
+    }
+    if (e.key === 'Enter') {
+      // Only intercept when a modal is open (Card or Content)
+      if (isCardModalOpen() || isModalOpen()) {
+        e.preventDefault();
+        const form = document.querySelector('#kanbanModal form, #contentModal form');
+        if (form) form.requestSubmit ? form.requestSubmit() : form.submit();
+        return;
+      }
+    }
+  }
+
+  // '?' opens the shortcuts help overlay
+  if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
     e.preventDefault();
-    openModal();
+    isShortcutsHelpOpen() ? hideShortcutsHelp() : showShortcutsHelp();
+    return;
+  }
+
+  // Cmd+K/Enter inside the command palette input
+  if (isPaletteOpen() && e.key === 'Enter') {
+    e.preventDefault();
+    selectActivePaletteItem();
+    return;
+  }
+  if (isPaletteOpen() && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    e.preventDefault();
+    movePaletteSelection(e.key === 'ArrowDown' ? 1 : -1);
+    return;
+  }
+
+  // Single-key shortcuts — skip when typing in form fields
+  if (isTypingInField(e)) return;
+
+  // '+' or 'n' — new card in active column
+  if (e.key === '+' || e.key === 'n') {
+    // Only meaningful on the Workflow/Board view
+    const activeView = document.querySelector('.sidebar__nav-link.active')?.dataset.view;
+    if (activeView === 'ideas') {
+      e.preventDefault();
+      const activeColumn = getActiveBoardColumn() || 'ideas';
+      openCardModal(null, activeColumn);
+    }
+    return;
+  }
+
+  // 1–5 — quick status set in the card modal
+  if (isCardModalOpen() && /^[1-5]$/.test(e.key)) {
+    e.preventDefault();
+    const stepIndex = parseInt(e.key, 10) - 1;
+    const steps = document.querySelectorAll('.status-pipeline__step');
+    if (steps[stepIndex]) steps[stepIndex].click();
+    return;
   }
 });
+
+// ─── Modal state helpers (so shortcut code can ask "is X open?") ────────────
+function isModalOpen() {
+  const m = document.getElementById('contentModal');
+  return m && m.style.display === 'flex';
+}
+function isCardModalOpen() {
+  const m = document.getElementById('kanbanModal');
+  return m && m.style.display === 'flex';
+}
+
+// ─── Shortcuts Help Overlay ──────────────────────────────────────────────────
+function isShortcutsHelpOpen() {
+  const el = document.getElementById('shortcutsHelp');
+  return el && !el.hasAttribute('hidden');
+}
+function showShortcutsHelp() {
+  const el = document.getElementById('shortcutsHelp');
+  if (el) el.removeAttribute('hidden');
+}
+function hideShortcutsHelp() {
+  const el = document.getElementById('shortcutsHelp');
+  if (el) el.setAttribute('hidden', '');
+}
+
+// Click backdrop / X to close
+document.addEventListener('click', (e) => {
+  if (e.target.matches('[data-close-help]')) hideShortcutsHelp();
+  if (e.target.matches('[data-close-palette]')) closeCommandPalette();
+});
+
+// ─── Command Palette ─────────────────────────────────────────────────────────
+function isPaletteOpen() {
+  const el = document.getElementById('commandPalette');
+  return el && !el.hasAttribute('hidden');
+}
+let _paletteActiveIndex = 0;
+let _paletteItems = [];
+
+function openCommandPalette() {
+  const palette = document.getElementById('commandPalette');
+  const input = document.getElementById('commandPaletteInput');
+  if (!palette || !input) return;
+  palette.removeAttribute('hidden');
+  input.value = '';
+  _paletteActiveIndex = 0;
+  renderPaletteResults('');
+  requestAnimationFrame(() => input.focus());
+}
+
+function closeCommandPalette() {
+  const palette = document.getElementById('commandPalette');
+  if (palette) palette.setAttribute('hidden', '');
+}
+
+function renderPaletteResults(query) {
+  const container = document.getElementById('commandPaletteResults');
+  if (!container) return;
+  const all = (typeof getAllCards === 'function' ? getAllCards() : []) || [];
+  const q = (query || '').toLowerCase().trim();
+  let results = all;
+  if (q) {
+    results = all.filter(c => {
+      const hay = [c.title || '', (c.tags || []).join(' '), c.notes || ''].join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+  }
+  results = results.slice(0, 12); // cap at 12 for performance
+
+  if (results.length === 0) {
+    _paletteItems = [];
+    container.innerHTML = q
+      ? `<div class="command-palette__no-results">Keine Karten gefunden für "${escapeHtml(query)}"</div>`
+      : `<div class="command-palette__empty">Tippe um Karten zu suchen…</div>`;
+    return;
+  }
+
+  _paletteItems = results;
+  _paletteActiveIndex = Math.min(_paletteActiveIndex, results.length - 1);
+  container.innerHTML = results.map((c, i) => `
+    <div class="command-palette__item${i === _paletteActiveIndex ? ' is-active' : ''}" data-card-id="${c.id}" data-index="${i}">
+      <div class="command-palette__item-title">${escapeHtml(c.title || '(ohne Titel)')}</div>
+      <div class="command-palette__item-meta">
+        <span>${escapeHtml(c.status || '?')}</span>
+        ${(c.tags && c.tags.length) ? c.tags.slice(0, 3).map(t => `<span class="command-palette__item-tag">${escapeHtml(t)}</span>`).join('') : ''}
+      </div>
+    </div>
+  `).join('');
+
+  // Wire up click + hover
+  container.querySelectorAll('.command-palette__item').forEach(el => {
+    el.addEventListener('click', () => openCardFromPalette(el.dataset.cardId));
+    el.addEventListener('mouseenter', () => {
+      _paletteActiveIndex = parseInt(el.dataset.index, 10);
+      updatePaletteActiveClass();
+    });
+  });
+}
+
+function updatePaletteActiveClass() {
+  document.querySelectorAll('.command-palette__item').forEach((el, i) => {
+    el.classList.toggle('is-active', i === _paletteActiveIndex);
+  });
+}
+
+function movePaletteSelection(delta) {
+  if (_paletteItems.length === 0) return;
+  _paletteActiveIndex = (_paletteActiveIndex + delta + _paletteItems.length) % _paletteItems.length;
+  updatePaletteActiveClass();
+  // Scroll into view
+  const active = document.querySelector('.command-palette__item.is-active');
+  if (active) active.scrollIntoView({ block: 'nearest' });
+}
+
+function selectActivePaletteItem() {
+  if (_paletteItems.length === 0) return;
+  const card = _paletteItems[_paletteActiveIndex];
+  if (card) openCardFromPalette(card.id);
+}
+
+function openCardFromPalette(cardId) {
+  closeCommandPalette();
+  if (typeof loadAllCards === 'function') loadAllCards().then(() => openCardModal(cardId));
+  else openCardModal(cardId);
+}
+
+// Live-search as user types
+document.addEventListener('input', (e) => {
+  if (e.target && e.target.id === 'commandPaletteInput') {
+    _paletteActiveIndex = 0;
+    renderPaletteResults(e.target.value);
+  }
+});
+
+// ─── Active board column (used by '+' shortcut) ─────────────────────────────
+function getActiveBoardColumn() {
+  // Returns the column-id whose .board__add-card is currently visible, or
+  // the column a card is currently selected in. For now returns the leftmost
+  // visible column. kanban.js's renderBoard() sets up the buttons; we read
+  // the first one.
+  const btns = document.querySelectorAll('.board__add-card');
+  if (btns.length === 0) return null;
+  return btns[0].dataset.column;
+}

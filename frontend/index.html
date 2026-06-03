@@ -330,5 +330,68 @@
   <script src="calendar.js"></script>
   <script src="effects.js"></script>
   <div class="kanban-toast" id="kanbanToast"></div>
+
+  <!-- Command Palette (toggled by Cmd/Ctrl+K) -->
+  <div class="command-palette" id="commandPalette" hidden>
+    <div class="command-palette__backdrop" data-close-palette></div>
+    <div class="command-palette__panel" role="dialog" aria-label="Command Palette">
+      <input
+        type="text"
+        id="commandPaletteInput"
+        class="command-palette__input"
+        placeholder="Suche nach Karten-Titel oder Tag…"
+        autocomplete="off"
+        spellcheck="false">
+      <div class="command-palette__results" id="commandPaletteResults">
+        <div class="command-palette__empty">Tippe um Karten zu suchen…</div>
+      </div>
+      <div class="command-palette__hint">
+        <kbd>↑</kbd><kbd>↓</kbd> navigieren &nbsp;·&nbsp; <kbd>Enter</kbd> öffnen &nbsp;·&nbsp; <kbd>Esc</kbd> schließen
+      </div>
+    </div>
+  </div>
+
+  <!-- Keyboard Shortcuts Help Overlay (toggled by '?' key) -->
+  <div class="shortcuts-help" id="shortcutsHelp" hidden>
+    <div class="shortcuts-help__backdrop" data-close-help></div>
+    <div class="shortcuts-help__panel" role="dialog" aria-label="Keyboard shortcuts">
+      <div class="shortcuts-help__header">
+        <h2>⌨️ Tastatur-Shortcuts</h2>
+        <button class="shortcuts-help__close" data-close-help aria-label="Schließen">×</button>
+      </div>
+      <div class="shortcuts-help__body">
+        <div class="shortcuts-group">
+          <h3>Erstellen &amp; Suchen</h3>
+          <dl>
+            <dt><kbd>+</kbd> <span>oder</span> <kbd>n</kbd></dt>
+            <dd>Neue Karte (in aktiver Spalte)</dd>
+            <dt><kbd>Cmd</kbd>/<kbd>Strg</kbd> + <kbd>K</kbd></dt>
+            <dd>Command-Palette: schnell zu Karte springen</dd>
+          </dl>
+        </div>
+        <div class="shortcuts-group">
+          <h3>Im Card-Modal</h3>
+          <dl>
+            <dt><kbd>1</kbd>…<kbd>5</kbd></dt>
+            <dd>Status direkt setzen (Ideen / Recherche / Skript / Recording / Hochgeladen)</dd>
+            <dt><kbd>Cmd</kbd>/<kbd>Strg</kbd> + <kbd>Enter</kbd></dt>
+            <dd>Speichern (funktioniert auch aus Notizen-Textarea)</dd>
+            <dt><kbd>Esc</kbd></dt>
+            <dd>Modal schließen</dd>
+          </dl>
+        </div>
+        <div class="shortcuts-group">
+          <h3>Hilfe</h3>
+          <dl>
+            <dt><kbd>?</kbd></dt>
+            <dd>Diesen Hilfe-Overlay öffnen/schließen</dd>
+          </dl>
+        </div>
+      </div>
+      <div class="shortcuts-help__footer">
+        Tipp: Shortcuts sind in Eingabefeldern deaktiviert. <kbd>Cmd</kbd>/<kbd>Strg</kbd>+Kombinationen funktionieren überall.
+      </div>
+    </div>
+  </div>
 </body>
 </html>

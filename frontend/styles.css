@@ -1842,3 +1842,258 @@ body.modal-open {
 @media (max-width: 900px) {
   .lib-grid { grid-template-columns: 1fr; }
 }
+
+/* ==========================================================================
+   Keyboard Shortcuts Help Overlay
+   ========================================================================== */
+
+.shortcuts-help[hidden] { display: none; }
+
+.shortcuts-help {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: shortcutsFadeIn 0.18s ease-out;
+}
+
+@keyframes shortcutsFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.shortcuts-help__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(11, 7, 20, 0.65);
+  backdrop-filter: blur(4px);
+  cursor: pointer;
+}
+
+.shortcuts-help__panel {
+  position: relative;
+  background: var(--bg-card, #1c1828);
+  border: 1px solid var(--border-subtle, #2d2640);
+  border-radius: 16px;
+  width: 560px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(124, 92, 191, 0.15);
+  animation: shortcutsSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes shortcutsSlideUp {
+  from { opacity: 0; transform: translateY(20px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.shortcuts-help__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-subtle, #2d2640);
+}
+
+.shortcuts-help__header h2 {
+  font-family: 'Playfair Display', serif;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text, #e6e0ee);
+  margin: 0;
+}
+
+.shortcuts-help__close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--text-secondary, #9d92b0);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background 0.15s, color 0.15s;
+}
+.shortcuts-help__close:hover {
+  background: var(--bg-hover, #2a2438);
+  color: var(--text, #e6e0ee);
+}
+
+.shortcuts-help__body {
+  padding: 16px 24px 8px;
+}
+
+.shortcuts-group {
+  margin-bottom: 20px;
+}
+
+.shortcuts-group h3 {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--nix-violet, #7c5cbf);
+  margin: 0 0 10px 0;
+}
+
+.shortcuts-group dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 16px;
+  row-gap: 10px;
+  align-items: center;
+}
+
+.shortcuts-group dt {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-secondary, #9d92b0);
+}
+
+.shortcuts-group dt span {
+  color: var(--text-muted, #6a6275);
+  font-size: 11px;
+}
+
+.shortcuts-group dd {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text, #e6e0ee);
+}
+
+.shortcuts-help__footer {
+  padding: 12px 24px;
+  border-top: 1px solid var(--border-subtle, #2d2640);
+  font-size: 12px;
+  color: var(--text-muted, #6a6275);
+  background: var(--bg-card-soft, rgba(255, 255, 255, 0.02));
+  border-radius: 0 0 16px 16px;
+}
+
+kbd {
+  display: inline-block;
+  padding: 3px 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--text, #e6e0ee);
+  background: var(--bg-card-soft, #2a2438);
+  border: 1px solid var(--border-subtle, #2d2640);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  min-width: 22px;
+  text-align: center;
+}
+
+/* ==========================================================================
+   Command Palette (Cmd/Ctrl+K)
+   ========================================================================== */
+
+.command-palette[hidden] { display: none; }
+
+.command-palette {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 15vh;
+  animation: shortcutsFadeIn 0.14s ease-out;
+}
+
+.command-palette__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(11, 7, 20, 0.55);
+  backdrop-filter: blur(3px);
+  cursor: pointer;
+}
+
+.command-palette__panel {
+  position: relative;
+  width: 560px;
+  max-width: calc(100vw - 32px);
+  background: var(--bg-card, #1c1828);
+  border: 1px solid var(--border-subtle, #2d2640);
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(124, 92, 191, 0.12);
+  overflow: hidden;
+  animation: shortcutsSlideUp 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.command-palette__input {
+  display: block;
+  width: 100%;
+  padding: 16px 20px;
+  font-family: inherit;
+  font-size: 16px;
+  color: var(--text, #e6e0ee);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle, #2d2640);
+  outline: none;
+}
+.command-palette__input::placeholder { color: var(--text-muted, #6a6275); }
+
+.command-palette__results {
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.command-palette__empty,
+.command-palette__no-results {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-muted, #6a6275);
+  font-size: 13px;
+}
+
+.command-palette__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.command-palette__item:hover,
+.command-palette__item.is-active {
+  background: var(--bg-hover, #2a2438);
+}
+.command-palette__item-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text, #e6e0ee);
+}
+.command-palette__item-meta {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted, #6a6275);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.command-palette__item-tag {
+  padding: 1px 6px;
+  background: var(--bg-card-soft, #2a2438);
+  border-radius: 3px;
+}
+
+.command-palette__hint {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border-subtle, #2d2640);
+  font-size: 11px;
+  color: var(--text-muted, #6a6275);
+  background: var(--bg-card-soft, rgba(255, 255, 255, 0.02));
+  text-align: center;
+}
