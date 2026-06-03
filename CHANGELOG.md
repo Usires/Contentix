@@ -7,19 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- **Interactive status pipeline in edit mode**: Clicking a step in the 5-stage pipeline (Ideen → Recherche → Skript → Recording → Hochgeladen) now updates the video's status, in both edit and new-card modes. Previously read-only when editing an existing card.
-- **Hover affordance** on pipeline steps: pointer cursor, slight Y-translate on hover, dot scales up. Makes it discoverable that the pipeline is interactive.
-- **Initial git commit** (commit 6cb9cf0): 30 files, 9,527 lines, all the v0.9.1 codebase finally under version control. The repo had been staged since April 17 but never committed.
-
 ### Changed
-- **README.md**: Status pipeline table now documents the 6 DB status values (`planned | research | script | recording | done | published`) and the column mapping. Replaces the outdated 3-value schema.
-- **AGENTS.md**: Video Object schema updated to include all 6 status values with semantics and Kanban column mapping.
-- **SPEC.md**: `videos.status` SQL comment expanded to document all 6 valid values.
-- **`frontend/kanban.js`**: Extracted `setupStatusPipeline(activeIdx)` helper function. Removes ~40 lines of duplicate pipeline code that existed separately in the edit and new-card branches.
+- **Sidebar layout**: "Nächstes Video" widget moved to the top of the action zone (directly below channel name). Stats badges and vidIQ button now form a separate "data zone" at the bottom.
+- **Sidebar color contrast**: Strengthened stat-badge backgrounds (rgba 0.12 → 0.18 / border 0.2 → 0.32), nav-link active state with violet left border, increased font-weight on footer/vidiq-button, higher opacity on tagline and footer for readability.
+- **Theme-aware violet variables**: Replaced all hardcoded `rgba(124, 92, 191, ...)` and `#7c5cbf` references with `color-mix(in srgb, var(--nix-violet) X%, transparent)` or `var(--nix-violet)`. Stat badges, navigation active state, refresh button, modal box-shadow etc. now follow the active theme's accent color (violet, green, gold, orange, or ice blue depending on season).
+- **Sidebar spacing**: Reduced `> * + *` margin from 32px to 24px for tighter visual grouping.
+
+### Added
+- **Keyboard shortcuts (Phase 1)**: Power-user features for faster workflow
+  - `+` or `n` — New card in active column (workflow view only)
+  - `1`-`5` — Set status directly in the card modal (Ideen / Recherche / Skript / Recording / Hochgeladen)
+  - `Cmd/Ctrl + K` — Command palette: live search across all card titles, tags, and notes
+  - `Cmd/Ctrl + Enter` — Save form (works from any field, including the notes textarea)
+  - `?` — Open keyboard shortcuts help overlay
+  - `Esc` — Close any open modal/palette/help (extended to cover palette + help too)
+- **Command palette** (`#commandPalette`): Top-of-screen search, Arrow keys to navigate, Enter to open, click on result, hover to highlight
+- **Keyboard shortcuts help overlay** (`#shortcutsHelp`): Beautiful grouped display with kbd-styled keys, click backdrop or X to close
+- **`isTypingInField(e)`** utility in utils.js: detects input/textarea/contenteditable so shortcuts don't fire while typing
+- **`showToast()`** utility in utils.js: transient feedback (used by shortcuts to confirm actions)
 
 ### Fixed
-- **Status change from edit modal**: Previously, to change a video's status, you had to drag-and-drop it on the board. Now you can also click the pipeline step in the modal. The hidden `form.status` field is updated immediately and saved with the form.
+- **`Cmd/Ctrl + Enter` from notes textarea** no longer inserts a literal newline — it now triggers the form save. Formatted save from anywhere in the card modal.
+
+## [0.9.3] — 2026-06-03
+
+### Added
+- **Auto-focus first input field in modals** + **selected-text-on-focus** for text inputs: One keystroke replaces existing titles for quick edits.
+- **Initial git commit** (commit 6cb9cf0): 30 files, 9,527 lines, the entire v0.9.1 codebase finally under version control.
+- **Interactive status pipeline in edit mode**: Clicking a step in the 5-stage pipeline now updates the video's status in both edit and new-card modes.
+- **Hover affordance** on pipeline steps: pointer cursor, slight Y-translate on hover, dot scales up.
+
+### Changed
+- **README.md**: Status pipeline table documents the 6 DB status values (`planned | research | script | recording | done | published`) and the column mapping.
+- **AGENTS.md / SPEC.md**: Schema updated to include all 6 status values.
+- **`frontend/kanban.js`**: Extracted `setupStatusPipeline(activeIdx)` helper, removed ~40 lines of duplicate code.
 
 ## [0.9.0] — 2026-05-29
 
