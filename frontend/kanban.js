@@ -378,6 +378,9 @@ function showConfirm(message, onConfirm) {
 // Works for both edit and new-card modes: click any step to set status.
 const PIPELINE_STEPS = ['ideas', 'research', 'skript', 'recording', 'uploaded'];
 
+// ─── Modal Helpers ───────────────────────────────────────────────────
+// (focusFirstField is in utils.js — loaded first, available globally)
+
 function setupStatusPipeline(activeIdx) {
   // Clean previous click handlers (clone-replace pattern) so we don't accumulate listeners
   const pipelineSteps = document.querySelectorAll('.status-pipeline__step');
@@ -491,6 +494,7 @@ function openCardModal(cardId = null, defaultColumn = 'ideas', prefillDate = nul
 
   document.getElementById('kanbanModal').style.display = 'flex';
   document.body.classList.add('modal-open');
+  focusFirstField('kanbanModal');
 }
 
 function closeCardModal() {

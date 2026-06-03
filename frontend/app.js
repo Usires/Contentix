@@ -299,6 +299,7 @@ function openModal(id = null) {
     delete form.dataset.editId;
   }
   modal.style.display = 'flex';
+  focusFirstField('contentModal');
 }
 
 function closeModal() {

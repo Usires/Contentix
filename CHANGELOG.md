@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Interactive status pipeline in edit mode**: Clicking a step in the 5-stage pipeline (Ideen → Recherche → Skript → Recording → Hochgeladen) now updates the video's status, in both edit and new-card modes. Previously read-only when editing an existing card.
+- **Hover affordance** on pipeline steps: pointer cursor, slight Y-translate on hover, dot scales up. Makes it discoverable that the pipeline is interactive.
+- **Initial git commit** (commit 6cb9cf0): 30 files, 9,527 lines, all the v0.9.1 codebase finally under version control. The repo had been staged since April 17 but never committed.
+
+### Changed
+- **README.md**: Status pipeline table now documents the 6 DB status values (`planned | research | script | recording | done | published`) and the column mapping. Replaces the outdated 3-value schema.
+- **AGENTS.md**: Video Object schema updated to include all 6 status values with semantics and Kanban column mapping.
+- **SPEC.md**: `videos.status` SQL comment expanded to document all 6 valid values.
+- **`frontend/kanban.js`**: Extracted `setupStatusPipeline(activeIdx)` helper function. Removes ~40 lines of duplicate pipeline code that existed separately in the edit and new-card branches.
+
+### Fixed
+- **Status change from edit modal**: Previously, to change a video's status, you had to drag-and-drop it on the board. Now you can also click the pipeline step in the modal. The hidden `form.status` field is updated immediately and saved with the form.
+
 ## [0.9.0] — 2026-05-29
 
 ### Added
