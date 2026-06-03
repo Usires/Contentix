@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`--text-on-dark-secondary` token** (per-theme): A new design token for secondary text on dark surfaces (e.g. sidebar). The previous `--text-secondary` was designed for light backgrounds and disappeared on dark. The new token is defined per-theme at ~78% brightness of `--text-on-dark` (violet, green, gold, warmgray, iceblue depending on theme).
 
 ### Changed
+- **Sidebar spacing between channel name and next-video widget**: added 16px extra `margin-top` on `.next-video-widget` when it follows the channel name. They were too tight, now have a bit more breathing room. Other sidebar spacings (widget → "Navigation" heading → nav items) remain unchanged.
+
+### Changed
 - **Sidebar text uses `--text-on-dark-secondary`**: tagline, stat labels, vidiq status and footer all switched to the new token. Opacity bumped to 1 where it was 0.85 because the new colors are already desaturated appropriately.
 
 ## [0.9.5] — 2026-06-03
