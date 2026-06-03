@@ -342,6 +342,22 @@
   align-items: center;
   gap: 4px;
   flex: 1;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+  user-select: none;
+}
+
+.status-pipeline__step:hover {
+  transform: translateY(-1px);
+}
+
+.status-pipeline__step:hover .status-pipeline__dot {
+  border-color: var(--nix-violet);
+  transform: scale(1.2);
+}
+
+.status-pipeline__step:active {
+  transform: translateY(0);
 }
 
 .status-pipeline__dot {

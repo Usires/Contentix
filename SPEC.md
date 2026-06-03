@@ -31,7 +31,13 @@
 CREATE TABLE videos (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
-  status TEXT DEFAULT 'planned',  -- 'planned' | 'published' | 'draft'
+  status TEXT DEFAULT 'planned',  -- 'planned' | 'research' | 'script' | 'recording' | 'done' | 'published'
+                                -- planned   = idea, not started
+                                -- research  = gathering material
+                                -- script    = writing script
+                                -- recording = recording in progress
+                                -- done      = uploaded to YouTube
+                                -- published = live on YouTube (calendar/bibliothek only)
   planned_date TEXT,
   published_date TEXT,
   video_id TEXT,                   -- YouTube video ID

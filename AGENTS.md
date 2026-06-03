@@ -51,7 +51,7 @@ This guide explains how AI assistants can interact with Contentix via its REST A
 {
   "id": "uuid",
   "title": "Video Title",
-  "status": "planned|published|in-editing",
+  "status": "planned|research|script|recording|done|published",
   "video_format": "longform|shorts|livestream",
   "thumbnail_url": "https://...",
   "planned_date": "2026-04-20T14:00:00Z",
@@ -67,6 +67,25 @@ This guide explains how AI assistants can interact with Contentix via its REST A
   "updated_at": "2026-04-17T14:00:00Z"
 }
 ```
+
+### Status Field (Pipeline)
+
+The `status` field has **6 valid values**, representing the YouTube production pipeline:
+
+| Status | Meaning | Kanban Column | Notes |
+|--------|---------|---------------|-------|
+| `planned` | Idea / not started | `ideas` | Default for new videos |
+| `research` | Research phase | `research` | Gathering material |
+| `script` | Writing script | `skript` | Linked to `/api/scripts` record |
+| `recording` | Recording in progress | `recording` | |
+| `done` | Uploaded to YouTube (not yet public) | `uploaded` | May have `video_id` but not public |
+| `published` | Live on YouTube | (none) | Only in Calendar/Bibliothek, NOT on board |
+
+**Migration history:**
+- v0.1.0: `planned | published | draft` (3 values)
+- v0.9.0: Extended to 6 values to support the 5-stage Kanban board pipeline
+
+**Validation:** Backend does not currently reject unknown status values. Frontend uses `STATUS_MAP` in `frontend/kanban.js` to translate between board columns and DB status values.
 
 ## Script Object
 

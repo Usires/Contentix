@@ -373,6 +373,50 @@ function showConfirm(message, onConfirm) {
   modal.style.display = 'flex';
 }
 
+// ─── Status Pipeline ───────────────────────────────────────────────────
+// Interactive 5-step progress bar used in the card modal.
+// Works for both edit and new-card modes: click any step to set status.
+const PIPELINE_STEPS = ['ideas', 'research', 'skript', 'recording', 'uploaded'];
+
+function setupStatusPipeline(activeIdx) {
+  // Clean previous click handlers (clone-replace pattern) so we don't accumulate listeners
+  const pipelineSteps = document.querySelectorAll('.status-pipeline__step');
+  pipelineSteps.forEach(step => {
+    const clone = step.cloneNode(true);
+    step.parentNode.replaceChild(clone, step);
+  });
+
+  // Re-query after clone
+  document.querySelectorAll('.status-pipeline__step').forEach((el, i) => {
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', () => {
+      const form = document.getElementById('kanbanForm');
+      if (form) form.status.value = PIPELINE_STEPS[i];
+      const allSteps = document.querySelectorAll('.status-pipeline__step');
+      allSteps.forEach((s, j) => {
+        s.classList.remove('is-done', 'is-active');
+        if (j < i) s.classList.add('is-done');
+        else if (j === i) s.classList.add('is-active');
+      });
+      const fillPct = PIPELINE_STEPS.length > 1
+        ? (i / (PIPELINE_STEPS.length - 1)) * 100
+        : 0;
+      document.getElementById('statusPipelineBarFill').style.width = fillPct + '%';
+    });
+  });
+
+  // Apply current active state without firing a click event
+  document.querySelectorAll('.status-pipeline__step').forEach((el, i) => {
+    el.classList.remove('is-done', 'is-active');
+    if (i < activeIdx) el.classList.add('is-done');
+    else if (i === activeIdx) el.classList.add('is-active');
+  });
+  const fillPct = PIPELINE_STEPS.length > 1
+    ? (activeIdx / (PIPELINE_STEPS.length - 1)) * 100
+    : 0;
+  document.getElementById('statusPipelineBarFill').style.width = fillPct + '%';
+}
+
 function openCardModal(cardId = null, defaultColumn = 'ideas', prefillDate = null) {
   const modal = document.getElementById('kanbanModal');
   const form = document.getElementById('kanbanForm');
@@ -409,17 +453,10 @@ function openCardModal(cardId = null, defaultColumn = 'ideas', prefillDate = nul
         form.planned_date.value = '';
         form.planned_time.value = '';
       }
-      // Show status pipeline (read-only display)
+      // Show status pipeline (interactive in edit mode too)
       const col = STATUS_MAP[card.status] || 'ideas';
-      const steps = ['ideas', 'research', 'skript', 'recording', 'uploaded'];
-      const activeIdx = steps.indexOf(col);
-      document.querySelectorAll('.status-pipeline__step').forEach((el, i) => {
-        el.classList.remove('is-done', 'is-active');
-        if (i < activeIdx) el.classList.add('is-done');
-        else if (i === activeIdx) el.classList.add('is-active');
-      });
-      const fillPct = (activeIdx / (steps.length - 1)) * 100;
-      document.getElementById('statusPipelineBarFill').style.width = fillPct + '%';
+      const activeIdx = PIPELINE_STEPS.indexOf(col);
+      setupStatusPipeline(activeIdx);
       form.dataset.editId = cardId;
       form.status.value = col; // Hidden input for handleCardSubmit
 
@@ -446,45 +483,10 @@ function openCardModal(cardId = null, defaultColumn = 'ideas', prefillDate = nul
     // Store the column for new card creation (used in handleCardSubmit)
     form.dataset.column = defaultColumn;
     form.status.value = defaultColumn;
-    // Reset pipeline for new cards
-    document.querySelectorAll('.status-pipeline__step').forEach(el => {
-      el.classList.remove('is-done', 'is-active');
-      el.style.cursor = 'pointer';
-    });
-    document.getElementById('statusPipelineBarFill').style.width = '0%';
+    setupStatusPipeline(0); // start at first step
     // Show/hide delete button depending on whether we're editing
     const deleteBtn = document.getElementById('kanbanDeleteBtn');
     if (deleteBtn) deleteBtn.style.display = 'none';
-
-    // Make pipeline steps clickable for new cards
-    const steps = ['ideas', 'research', 'skript', 'recording', 'uploaded'];
-    const pipelineSteps = document.querySelectorAll('.status-pipeline__step');
-
-    // Remove old handlers by cloning (cleanest way to avoid duplicates)
-    pipelineSteps.forEach(step => {
-      const clone = step.cloneNode(true);
-      step.parentNode.replaceChild(clone, step);
-    });
-
-    // Re-query after clone
-    document.querySelectorAll('.status-pipeline__step').forEach((el, i) => {
-      el.style.cursor = 'pointer';
-      el.addEventListener('click', () => {
-        form.status.value = steps[i];
-        const allSteps = document.querySelectorAll('.status-pipeline__step');
-        allSteps.forEach((s, j) => {
-          s.classList.remove('is-done', 'is-active');
-          if (j < i) s.classList.add('is-done');
-          else if (j === i) s.classList.add('is-active');
-        });
-        const fillPct = (i / (steps.length - 1)) * 100;
-        document.getElementById('statusPipelineBarFill').style.width = fillPct + '%';
-      });
-    });
-
-    // Activate the first step by default
-    const firstStep = document.querySelector('.status-pipeline__step');
-    if (firstStep) firstStep.click();
   }
 
   document.getElementById('kanbanModal').style.display = 'flex';

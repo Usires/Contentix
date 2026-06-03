@@ -88,13 +88,36 @@ Früher gab es ein globares `window.allCards`. Das verursachte Race Conditions w
 
 ### Spalten (5)
 
-| ID | Label | Farbe |
-|----|-------|-------|
-| `ideas` | 💡 Ideen | `--lavender-mid` |
-| `research` | 🔬 Recherche | `--celtic-blue` |
-| `skript` | ✏️ Skript | `--nix-violet` |
-| `recording` | 🎬 Recording | `--warning` |
-| `published` | ✅ Publiziert | `--success` |
+| Spalten-ID | Label | DB-Status | Farbe |
+|------------|-------|-----------|-------|
+| `ideas` | 💡 Ideen | `planned` | `--lavender-mid` |
+| `research` | 🔬 Recherche | `research` | `--celtic-blue` |
+| `skript` | ✏️ Skript | `script` | `--nix-violet` |
+| `recording` | 🎬 Recording | `recording` | `--warning` |
+| `uploaded` | ✅ Hochgeladen | `done` | `--success` |
+
+**Wichtig:** `published` ist **keine Board-Spalte** — es ist der finale Status wenn ein Video tatsächlich bei YouTube gelandet ist (mit echter `video_id` und `published_date`). Diese Videos erscheinen nur im Kalender und in der Bibliothek, nicht im Board.
+
+### Status-Pipeline (komplett)
+
+Die DB speichert `status` als String. Es gibt 6 mögliche Werte:
+
+| DB-Status | Bedeutung | Wo sichtbar |
+|-----------|-----------|-------------|
+| `planned` | Idee / noch nicht angefangen | Board (Spalte `ideas`) |
+| `research` | Recherche läuft | Board (Spalte `research`) |
+| `script` | Skript wird geschrieben | Board (Spalte `skript`) |
+| `recording` | Video wird aufgenommen | Board (Spalte `recording`) |
+| `done` | Hochgeladen (YouTube-Upload fertig) | Board (Spalte `uploaded`) |
+| `published` | Live auf YouTube | Kalender + Bibliothek (KEIN Board) |
+
+Die `STATUS_MAP` in `frontend/kanban.js` macht die Spalten-↔-Status-Translation. Drag-and-Drop zwischen Spalten setzt automatisch den passenden `status` über `reverseStatusMap`.
+
+### Historisches
+
+- v0.1.0 hatte nur 3 Status-Werte: `planned | published | draft`
+- v0.9.0 erweiterte auf 5-Spalten-Pipeline: `planned | research | script | recording | done`
+- `published` wurde als Final-Status beibehalten, ist aber nicht mehr auf dem Board
 
 ### CSS Grid
 
