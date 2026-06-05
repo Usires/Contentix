@@ -104,8 +104,9 @@ function renderBoard() {
 
 // ─── Render Single Card ────────────────────────────────────────────────────────
 function renderCard(card) {
-  const authorIcon = card.nix_comment_source === 'nix' ? 'Nix' : 'Dirk';
-  const authorName = card.nix_comment_source === 'nix' ? 'Nix' : 'Dirk';
+  const isNix = card.nix_comment_source === 'nix';
+  const authorIcon = isNix ? '🐧' : '🎬';
+  const authorName = isNix ? 'Nix' : 'Dirk';
   const hasResearch = card.nix_comment && card.nix_comment.trim();
   const isPublishedWithThumb = card.status === 'done' && card.thumbnail_url;
 
