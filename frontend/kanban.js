@@ -104,7 +104,7 @@ function renderBoard() {
 
 // ─── Render Single Card ────────────────────────────────────────────────────────
 function renderCard(card) {
-  const isNix = card.nix_comment_source === 'nix';
+  const isNix = (card.owner || 'dirk') === 'nix';
   const authorIcon = isNix ? '🐧' : '🎬';
   const authorName = isNix ? 'Nix' : 'Dirk';
   const hasResearch = card.nix_comment && card.nix_comment.trim();
@@ -442,6 +442,7 @@ function openCardModal(cardId = null, defaultColumn = 'ideas', prefillDate = nul
       form.title.value = card.title || '';
       form.notes.value = card.notes || '';
       form.tags.value = card.tags ? card.tags.join(', ') : '';
+      form.owner.value = card.owner || 'dirk';
       form.youtube_url.value = card.youtube_url || '';
       if (prefillDate) {
         // Use new date from calendar drag-drop, keep original time
@@ -538,6 +539,7 @@ async function handleCardSubmit(e) {
     notes: form.notes.value,
     tags: form.tags.value.split(',').map(t => t.trim()).filter(Boolean),
     status: reverseStatusMap[col] || 'planned',
+    owner: form.owner?.value || 'dirk',
     youtube_url: form.youtube_url ? form.youtube_url.value : undefined,
     planned_date: form.planned_date?.value ? (form.planned_time?.value ? form.planned_date.value + 'T' + form.planned_time.value + ':00' : form.planned_date.value) : null
   };

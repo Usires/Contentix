@@ -45,11 +45,18 @@ async function initDB() {
         notes TEXT,
         nix_comment TEXT,
         nix_comment_source TEXT DEFAULT 'manual',
+        owner TEXT DEFAULT 'dirk',
         position INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
       );
     `);
+
+    // Migrations: add new columns to existing DBs
+    const videoCols = db.exec("PRAGMA table_info(videos)")[0]?.values.map(r => r[1]) || [];
+    if (!videoCols.includes('owner')) {
+      try { db.run("ALTER TABLE videos ADD COLUMN owner TEXT DEFAULT 'dirk'"); console.log('Migration: added owner column to videos'); } catch(e) { console.error('Migration videos.owner failed:', e.message); }
+    }
     db.run(`
       CREATE TABLE IF NOT EXISTS vidiq_cache (
         channel_id TEXT PRIMARY KEY,
@@ -324,6 +331,7 @@ app.get('/api/videos', (req, res) => {
       notes: v.notes || '',
       nix_comment: v.nix_comment || '',
       nix_comment_source: v.nix_comment_source || 'manual',
+      owner: v.owner || 'dirk',
       script_id: v.script_id || ''
     }));
     res.json(parsed);
@@ -396,7 +404,7 @@ app.post('/api/videos', (req, res) => {
       title, status = 'planned', video_format = 'longform', thumbnail_url = '',
       planned_date = null, published_date = null,
       video_id = null, youtube_url = null, tags = [], notes = '',
-      nix_comment = '', nix_comment_source = 'manual', position = 0,
+      nix_comment = '', nix_comment_source = 'manual', owner = 'dirk', position = 0,
       script_id = ''
     } = req.body;
     
@@ -404,10 +412,10 @@ app.post('/api/videos', (req, res) => {
     const now = new Date().toISOString();
     
     run(
-      `INSERT INTO videos (id, title, status, video_format, thumbnail_url, planned_date, published_date, video_id, youtube_url, tags, notes, nix_comment, nix_comment_source, position, script_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO videos (id, title, status, video_format, thumbnail_url, planned_date, published_date, video_id, youtube_url, tags, notes, nix_comment, nix_comment_source, owner, position, script_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id, title, status, video_format, thumbnail_url, planned_date, published_date, video_id, youtube_url,
-      JSON.stringify(tags), notes, nix_comment, nix_comment_source, position, script_id, now, now
+      JSON.stringify(tags), notes, nix_comment, nix_comment_source, owner, position, script_id, now, now
     );
     saveDB();
     
@@ -434,7 +442,7 @@ app.put('/api/videos/:id', (req, res) => {
     const { id } = req.params;
     const existing = getAll('SELECT * FROM videos WHERE id = ?', id)[0];
     if (!existing) { res.status(404).json({ error: 'Video nicht gefunden' }); return; }
-    const { title, status, video_format, thumbnail_url, planned_date, published_date, video_id, youtube_url, tags, notes, nix_comment, nix_comment_source, position, script_id } = req.body;
+    const { title, status, video_format, thumbnail_url, planned_date, published_date, video_id, youtube_url, tags, notes, nix_comment, nix_comment_source, owner, position, script_id } = req.body;
     
     const updates = [];
     const params = [];
@@ -450,7 +458,8 @@ app.put('/api/videos/:id', (req, res) => {
     if (tags !== undefined) { updates.push('tags = ?'); params.push(JSON.stringify(tags)); }
     if (notes !== undefined) { updates.push('notes = ?'); params.push(notes); }
     if (nix_comment !== undefined) { updates.push('nix_comment = ?'); params.push(nix_comment); }
-    if (nix_comment_source !== undefined) { updates.push('nix_comment_source = ?'); params.push(nix_comment_source); }
+    if (nix_comment_source !== undefined) { updates.push("nix_comment_source = ?"); params.push(nix_comment_source); }
+    if (owner !== undefined) { updates.push("owner = ?"); params.push(owner); }
     if (script_id !== undefined) { updates.push('script_id = ?'); params.push(script_id); }
     if (position !== undefined) { updates.push('position = ?'); params.push(position); }
     
@@ -482,7 +491,7 @@ app.patch('/api/videos/:id', (req, res) => {
     const { id } = req.params;
     const existing = getAll('SELECT * FROM videos WHERE id = ?', id)[0];
     if (!existing) { res.status(404).json({ error: 'Video nicht gefunden' }); return; }
-    const { title, status, video_format, thumbnail_url, planned_date, published_date, video_id, youtube_url, tags, notes, nix_comment, nix_comment_source, position, script_id } = req.body;
+    const { title, status, video_format, thumbnail_url, planned_date, published_date, video_id, youtube_url, tags, notes, nix_comment, nix_comment_source, owner, position, script_id } = req.body;
     
     const updates = [];
     const params = [];
@@ -498,7 +507,8 @@ app.patch('/api/videos/:id', (req, res) => {
     if (tags !== undefined) { updates.push('tags = ?'); params.push(JSON.stringify(tags)); }
     if (notes !== undefined) { updates.push('notes = ?'); params.push(notes); }
     if (nix_comment !== undefined) { updates.push('nix_comment = ?'); params.push(nix_comment); }
-    if (nix_comment_source !== undefined) { updates.push('nix_comment_source = ?'); params.push(nix_comment_source); }
+    if (nix_comment_source !== undefined) { updates.push("nix_comment_source = ?"); params.push(nix_comment_source); }
+    if (owner !== undefined) { updates.push("owner = ?"); params.push(owner); }
     if (script_id !== undefined) { updates.push('script_id = ?'); params.push(script_id); }
     if (position !== undefined) { updates.push('position = ?'); params.push(position); }
     

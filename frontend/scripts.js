@@ -136,7 +136,11 @@ function renderEditor() {
         <span class="script-stats-item" id="charCountStat">${s.content ? s.content.length : 0} Zeichen</span>
         <span class="script-stats-item" id="saveStatus">${isDirty ? '⚠ ungespeichert' : '✓ gespeichert'}</span>
       </div>
-      <button onclick="saveScript()">💾 Speichern</button>
+      <div class="scripts-editor-actions">
+        <button class="btn btn--secondary" onclick="archiveScript()" title="Skript archivieren (nicht löschen)">📦 Archivieren</button>
+        <button class="btn btn--danger" onclick="deleteScript()" title="Skript endgültig löschen">🗑️ Löschen</button>
+        <button class="btn btn--primary" onclick="saveScript()">💾 Speichern</button>
+      </div>
     </div>
   `;
 }
@@ -307,6 +311,56 @@ async function createNewScript() {
   } catch (err) {
     console.error(err);
   }
+}
+
+async function archiveScript() {
+  if (!activeScript) return;
+  const ok = confirm(`📦 Skript „${activeScript.title}“ archivieren?\n\nArchivierte Skripte bleiben erhalten, werden aber in der Hauptansicht ausgeblendet. Du kannst sie über die Archiv-Ansicht wiederherstellen.`);
+  if (!ok) return;
+  try {
+    const res = await fetch(`${API}/scripts/${activeScript.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...activeScript, status: 'archived' })
+    });
+    if (!res.ok) throw new Error('Archivieren fehlgeschlagen');
+    const updated = await res.json();
+    const idx = allScripts.findIndex(s => s.id === activeScript.id);
+    if (idx >= 0) allScripts[idx] = updated;
+    activeScript = updated;
+    renderScriptsView();
+    showToast('Skript archiviert');
+  } catch (e) {
+    alert('Fehler beim Archivieren: ' + e.message);
+  }
+}
+
+async function deleteScript() {
+  if (!activeScript) return;
+  const ok = confirm(`🗑️ Skript „${activeScript.title}“ wirklich löschen?\n\nDas ist nicht widerrufbar!`);
+  if (!ok) return;
+  try {
+    const res = await fetch(`${API}/scripts/${activeScript.id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Löschen fehlgeschlagen');
+    allScripts = allScripts.filter(s => s.id !== activeScript.id);
+    activeScript = null;
+    renderScriptsView();
+    showToast('Skript gelöscht');
+  } catch (e) {
+    alert('Fehler beim Löschen: ' + e.message);
+  }
+}
+
+function showToast(message) {
+  const toast = document.createElement('div');
+  toast.className = 'scripts-toast';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.classList.add('scripts-toast--show'), 10);
+  setTimeout(() => {
+    toast.classList.remove('scripts-toast--show');
+    setTimeout(() => toast.remove(), 300);
+  }, 2200);
 }
 
 async function saveScript(silent = false) {

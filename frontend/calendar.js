@@ -204,7 +204,7 @@ function renderCalendarDay(year, month, day, isOtherMonth, today, isCurrentMonth
           const dateSrc = e.planned_date || e.published_date || '';
           const timeStr = dateSrc.split('T')[1]?.substring(0, 5) || '';
           const dateStr = dateSrc.split('T')[0]?.substring(5) || ''; // "MM-DD" -> "TT/MM"
-          const isNix = e.nix_comment_source === 'nix';
+          const isNix = (e.owner || 'dirk') === 'nix';
           const authorIcon = isNix ? '🐧' : '🎬';
           const authorName = isNix ? 'Nix' : 'Dirk';
           return `<div class="calendar-event ${cardClass}" ${draggableAttr} onclick="event.stopPropagation(); openCardFromCalendar('${e.id}')">
@@ -312,7 +312,7 @@ function renderWeekView(grid, year, month, weeks, weekIndex, allCards) {
           const dragAttrs = isDraggable
             ? `draggable="true" ondragstart="handleCardDragStart(event, '${e.id}')" ondragend="handleCardDragEnd(event)"`
             : 'draggable="false"';
-          const isNix = e.nix_comment_source === 'nix';
+          const isNix = (e.owner || 'dirk') === 'nix';
           const authorIcon = isNix ? '🐧' : '🎬';
           const authorName = isNix ? 'Nix' : 'Dirk';
           return `<div class="calendar-week-card ${cardClass}" ${dragAttrs} data-card-id="${e.id}" onclick="event.stopPropagation(); openCardFromCalendar('${e.id}')">
@@ -481,7 +481,7 @@ async function selectCalendarDay(dateStr) {
     </div>
     <div class="calendar-day-detail__cards">
       ${dayEvents.map(e => {
-        const isNix = e.nix_comment_source === 'nix';
+        const isNix = (e.owner || 'dirk') === 'nix';
         const authorIcon = isNix ? '🐧' : '🎬';
         const authorName = isNix ? 'Nix' : 'Dirk';
         const dateSrc = e.planned_date || e.published_date || '';
