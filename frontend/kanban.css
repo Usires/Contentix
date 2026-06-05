@@ -146,6 +146,13 @@
   font-style: italic;
 }
 
+.kanban-card__date {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+  margin-left: auto;
+}
+
 .kanban-card__meta {
   display: flex;
   flex-wrap: wrap;
