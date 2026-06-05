@@ -201,10 +201,17 @@ function renderCalendarDay(year, month, day, isOtherMonth, today, isCurrentMonth
             ? `draggable="true" ondragstart="handleCardDragStart(event, '${e.id}')" ondragend="handleCardDragEnd(event)"`
             : 'draggable="false"';
           const cardClass = isPast ? 'calendar-event--past' : 'calendar-event--' + statusClass;
-          const timeStr = (e.planned_date || e.published_date || '').split('T')[1]?.substring(0, 5) || '';
+          const dateSrc = e.planned_date || e.published_date || '';
+          const timeStr = dateSrc.split('T')[1]?.substring(0, 5) || '';
+          const dateStr = dateSrc.split('T')[0]?.substring(5) || ''; // "MM-DD" -> "TT/MM"
+          const isNix = e.nix_comment_source === 'nix';
+          const authorIcon = isNix ? '🐧' : '🎬';
+          const authorName = isNix ? 'Nix' : 'Dirk';
           return `<div class="calendar-event ${cardClass}" ${draggableAttr} onclick="event.stopPropagation(); openCardFromCalendar('${e.id}')">
             <span class="calendar-event__time">${timeStr}</span>
+            <span class="calendar-event__date">${dateStr}</span>
             <span class="calendar-event__title">${isVidiq ? '🔴 ' : '📋 '}${escapeHtml(e.title)}</span>
+            <span class="calendar-event__author" title="Owner: ${authorName}">${authorIcon}</span>
           </div>`;
         }).join('')}
       </div>`;
@@ -298,14 +305,21 @@ function renderWeekView(grid, year, month, weeks, weekIndex, allCards) {
           const statusClass = e.status === 'published' ? 'published' : e.status === 'recording' ? 'recording' : 'planned';
           const icon = e.status === 'published' ? '📺' : e.status === 'recording' ? '🎬' : '📋';
           const cardClass = day.isPast ? 'calendar-event--past' : 'calendar-event--' + statusClass;
-          const timeStr = (e.planned_date || e.published_date || '').split('T')[1]?.substring(0, 5) || '';
+          const dateSrc = e.planned_date || e.published_date || '';
+          const timeStr = dateSrc.split('T')[1]?.substring(0, 5) || '';
+          const dateStr = dateSrc.split('T')[0]?.substring(5) || ''; // "MM-DD" -> "TT/MM"
           const isDraggable = e.status !== 'published';
           const dragAttrs = isDraggable
             ? `draggable="true" ondragstart="handleCardDragStart(event, '${e.id}')" ondragend="handleCardDragEnd(event)"`
             : 'draggable="false"';
+          const isNix = e.nix_comment_source === 'nix';
+          const authorIcon = isNix ? '🐧' : '🎬';
+          const authorName = isNix ? 'Nix' : 'Dirk';
           return `<div class="calendar-week-card ${cardClass}" ${dragAttrs} data-card-id="${e.id}" onclick="event.stopPropagation(); openCardFromCalendar('${e.id}')">
             <span class="calendar-event__time">${timeStr}</span>
+            <span class="calendar-event__date">${dateStr}</span>
             <span class="calendar-event__title">${icon} ${escapeHtml(e.title)}</span>
+            <span class="calendar-event__author" title="Owner: ${authorName}">${authorIcon}</span>
           </div>`;
         }).join('');
       }
@@ -466,9 +480,20 @@ async function selectCalendarDay(dateStr) {
       <button class="calendar-day-detail__close" onclick="document.getElementById('calendarDayDetail').innerHTML=''">×</button>
     </div>
     <div class="calendar-day-detail__cards">
-      ${dayEvents.map(e => `
+      ${dayEvents.map(e => {
+        const isNix = e.nix_comment_source === 'nix';
+        const authorIcon = isNix ? '🐧' : '🎬';
+        const authorName = isNix ? 'Nix' : 'Dirk';
+        const dateSrc = e.planned_date || e.published_date || '';
+        const dateStr = dateSrc.split('T')[0]?.substring(5) || ''; // "MM-DD" -> "TT/MM"
+        return `
       <div class="kanban-card" data-id="${e.id}" onclick="openCardFromCalendar('${e.id}')">
         <div class="kanban-card__title">${escapeHtml(e.title)}</div>
+        <div class="kanban-card__author">
+          <span class="kanban-card__author-icon">${authorIcon}</span>
+          <span class="kanban-card__author-name">${authorName}</span>
+          ${dateStr ? `<span class="kanban-card__date">📅 ${dateStr}</span>` : ''}
+        </div>
         <div class="kanban-card__meta">
           ${e.tags ? e.tags.slice(0, 3).map(t => `<span class="kanban-card__tag">${escapeHtml(t)}</span>`).join('') : ''}
         </div>
@@ -476,7 +501,8 @@ async function selectCalendarDay(dateStr) {
           <div class="nix-research__header">🐧 Nix sagt:</div>
           <div class="nix-research__text">${escapeHtml(truncate(e.nix_comment, 100))}</div>
         </div>` : ''}
-      </div>`).join('')}
+      </div>`;
+      }).join('')}
     </div>
   </div>
   `;

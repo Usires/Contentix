@@ -651,6 +651,27 @@
   font-weight: 700;
   margin-right: 4px;
   min-width: 32px;
+}
+
+.calendar-event__date {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted, #8b8590);
+  margin-right: 6px;
+  font-family: var(--font-mono, monospace);
+  flex-shrink: 0;
+}
+
+.calendar-event__author {
+  margin-left: auto;
+  font-size: 12px;
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.calendar-event__author:hover {
+  opacity: 1;
+}
   display: inline-block;
   color: #1a1a1a;
   opacity: 0.6;
