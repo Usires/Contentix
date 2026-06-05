@@ -1792,6 +1792,8 @@ body.modal-open {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  max-width: 100%;
+  display: block;
 }
 
 .video-row .meta {
