@@ -118,6 +118,11 @@ function renderCard(card) {
       <span class="kanban-card__author-icon">${authorIcon}</span>
       <span class="kanban-card__author-name">${authorName}</span>
     </div>
+    <div class="kanban-card__date-row">
+      ${card.planned_date
+        ? `📅 ${card.planned_date.split('T')[0]?.substring(5) || card.planned_date.split('T')[0] || 'Ungeplant'}`
+        : `<span class="kanban-card__date-row--unset">📅 Ungeplant</span>`}
+    </div>
     <div class="kanban-card__meta">
       ${card.tags ? card.tags.slice(0, 3).map(t =>
         `<span class="kanban-card__tag">${escapeHtml(t)}</span>`

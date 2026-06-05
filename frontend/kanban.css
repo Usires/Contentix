@@ -153,6 +153,18 @@
   margin-left: auto;
 }
 
+.kanban-card__date-row {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+  margin-bottom: 8px;
+}
+
+.kanban-card__date-row--unset {
+  font-style: italic;
+  opacity: 0.6;
+}
+
 .kanban-card__meta {
   display: flex;
   flex-wrap: wrap;
