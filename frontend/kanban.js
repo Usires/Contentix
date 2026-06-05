@@ -103,6 +103,13 @@ function renderBoard() {
 }
 
 // ─── Render Single Card ────────────────────────────────────────────────────────
+function formatDateTTMM(isoDate) {
+  // isoDate like "2026-06-15" or "2026-06-15T10:00:00" → "15.06."
+  const datePart = (isoDate || '').split('T')[0] || '';
+  if (!datePart || datePart.length < 10) return isoDate || 'Ungeplant';
+  return `${datePart.substring(8, 10)}.${datePart.substring(5, 7)}.`;
+}
+
 function renderCard(card) {
   const isNix = (card.owner || 'dirk') === 'nix';
   const authorIcon = isNix ? '🐧' : '🎬';
@@ -120,7 +127,7 @@ function renderCard(card) {
     </div>
     <div class="kanban-card__date-row">
       ${card.planned_date
-        ? `📅 ${card.planned_date.split('T')[0]?.substring(5) || card.planned_date.split('T')[0] || 'Ungeplant'}`
+        ? `📅 ${formatDateTTMM(card.planned_date)}`
         : `<span class="kanban-card__date-row--unset">📅 Ungeplant</span>`}
     </div>
     <div class="kanban-card__meta">

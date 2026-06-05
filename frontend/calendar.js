@@ -203,7 +203,7 @@ function renderCalendarDay(year, month, day, isOtherMonth, today, isCurrentMonth
           const cardClass = isPast ? 'calendar-event--past' : 'calendar-event--' + statusClass;
           const dateSrc = e.planned_date || e.published_date || '';
           const timeStr = dateSrc.split('T')[1]?.substring(0, 5) || '';
-          const dateStr = dateSrc.split('T')[0]?.substring(5) || ''; // "MM-DD" -> "TT/MM"
+          const dateStr = (() => { const p = (dateSrc.split('T')[0] || ''); if (p.length < 10) return ''; return p.substring(8, 10) + '.' + p.substring(5, 7) + '.'; })(); // TT.MM.
           const isNix = (e.owner || 'dirk') === 'nix';
           const authorIcon = isNix ? '🐧' : '🎬';
           const authorName = isNix ? 'Nix' : 'Dirk';
@@ -307,7 +307,7 @@ function renderWeekView(grid, year, month, weeks, weekIndex, allCards) {
           const cardClass = day.isPast ? 'calendar-event--past' : 'calendar-event--' + statusClass;
           const dateSrc = e.planned_date || e.published_date || '';
           const timeStr = dateSrc.split('T')[1]?.substring(0, 5) || '';
-          const dateStr = dateSrc.split('T')[0]?.substring(5) || ''; // "MM-DD" -> "TT/MM"
+          const dateStr = (() => { const p = (dateSrc.split('T')[0] || ''); if (p.length < 10) return ''; return p.substring(8, 10) + '.' + p.substring(5, 7) + '.'; })(); // TT.MM.
           const isDraggable = e.status !== 'published';
           const dragAttrs = isDraggable
             ? `draggable="true" ondragstart="handleCardDragStart(event, '${e.id}')" ondragend="handleCardDragEnd(event)"`
@@ -485,7 +485,7 @@ async function selectCalendarDay(dateStr) {
         const authorIcon = isNix ? '🐧' : '🎬';
         const authorName = isNix ? 'Nix' : 'Dirk';
         const dateSrc = e.planned_date || e.published_date || '';
-        const dateStr = dateSrc.split('T')[0]?.substring(5) || ''; // "MM-DD" -> "TT/MM"
+        const dateStr = (() => { const p = (dateSrc.split('T')[0] || ''); if (p.length < 10) return ''; return p.substring(8, 10) + '.' + p.substring(5, 7) + '.'; })(); // TT.MM.
         return `
       <div class="kanban-card" data-id="${e.id}" onclick="openCardFromCalendar('${e.id}')">
         <div class="kanban-card__title">${escapeHtml(e.title)}</div>
