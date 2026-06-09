@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.8] — 2026-06-09
+
+### Added
+- **🖨️ Skript-Druckansicht** im Skript-Editor: Neuer "🖨️ Drucken"-Button im Editor-Footer öffnet eine formatierte Druckansicht des aktuellen Skripts.
+  - Eigenes Print-Layout: Header mit Titel, Datum, Wortzahl und ggf. verlinktem Video · gerenderter Markdown-Body in Georgia Serif 12pt · Footer mit "Contentix · Titel"
+  - Code-Blöcke, Blockquotes, Headings mit typografischen `page-break`/`page-break-inside`-Regeln für saubere Seitenumbrüche
+  - Implementiert per **verstecktes iframe** (statt `window.open()`), umgeht Popup-Blocker in Vivaldi/Chrome und erhält den User-Gesture-Token für `window.print()` zuverlässig
+  - Inline-CSS im iframe (kein Cross-Origin-Stylesheet-Lookup nötig)
+- **`@media print` Stylesheet** in `styles.css`: Versteckt Sidebar/Toolbar/Editor-Footer/Textarea/List-Panel, wenn man im Skript-Editor Ctrl+P drückt — nur das gerenderte Markdown wird gedruckt.
+
 ## [Unreleased]
 
 ### Added

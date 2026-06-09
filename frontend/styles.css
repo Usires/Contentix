@@ -2114,3 +2114,41 @@ kbd {
   background: var(--bg-card-soft, rgba(255, 255, 255, 0.02));
   text-align: center;
 }
+
+/* ==========================================================================
+   PRINT MODE — Skripte
+   ========================================================================== */
+@media print {
+  /* Hide everything that isn't the script preview */
+  body { background: #fff !important; color: #111 !important; }
+  .sidebar, .topbar, .modal-overlay,
+  .scripts-list-panel, .scripts-toolbar, .scripts-textarea,
+  .scripts-editor-header, .scripts-editor-footer,
+  .scripts-editor-actions, .script-stats {
+    display: none !important;
+  }
+  .scripts-editor-panel, .scripts-editor-body, .scripts-editor-input,
+  .scripts-preview {
+    box-shadow: none !important;
+    border: none !important;
+    background: #fff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  .scripts-preview {
+    font-family: Georgia, 'Times New Roman', serif !important;
+    font-size: 12pt !important;
+    line-height: 1.6 !important;
+    color: #1a1520 !important;
+  }
+  .scripts-preview h1, .scripts-preview h2, .scripts-preview h3 {
+    color: #1a1520 !important;
+    page-break-after: avoid;
+  }
+  .scripts-preview pre, .scripts-preview blockquote {
+    page-break-inside: avoid;
+  }
+  @page { margin: 18mm; }
+}

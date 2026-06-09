@@ -137,6 +137,7 @@ function renderEditor() {
         <span class="script-stats-item" id="saveStatus">${isDirty ? '⚠ ungespeichert' : '✓ gespeichert'}</span>
       </div>
       <div class="scripts-editor-actions">
+        <button class="btn btn--secondary" onclick="printActiveScript()" title="Skript drucken / als PDF speichern">🖨️ Drucken</button>
         <button class="btn btn--secondary" onclick="archiveScript()" title="Skript archivieren (nicht löschen)">📦 Archivieren</button>
         <button class="btn btn--danger" onclick="deleteScript()" title="Skript endgültig löschen">🗑️ Löschen</button>
         <button class="btn btn--primary" onclick="saveScript()">💾 Speichern</button>
@@ -153,6 +154,79 @@ function allVideosHtml(selectedId) {
     const sel = v.id === selectedId ? ' selected' : '';
     return `<option value="${v.id}"${sel}>${escapeHtml(v.title)}</option>`;
   }).join('');
+}
+
+// ─── Print ─────────────────────────────────────────────────────────────────
+function printActiveScript() {
+  if (!activeScript) return;
+  const title = activeScript.title || 'Unbenanntes Skript';
+  const body = renderPreview(activeScript.content || '');
+  const linkedVideo = activeScript.video_id ? getVideoTitle(activeScript.video_id) : null;
+  const date = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const wordCount = countWords(activeScript.content || '');
+
+  // Build print document in a hidden iframe — avoids popup blockers (Vivaldi!)
+  // and preserves the user-gesture chain for window.print() inside the iframe.
+  let iframe = document.getElementById('printIframe');
+  if (!iframe) {
+    iframe = document.createElement('iframe');
+    iframe.id = 'printIframe';
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+  }
+
+  const doc = iframe.contentDocument || iframe.contentWindow.document;
+  doc.open();
+  doc.write(`<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(title)}</title>
+  <style>
+    body { background: #fff; color: #111; font-family: Georgia, 'Times New Roman', serif; margin: 0; padding: 40px 56px; }
+    .print-header { border-bottom: 2px solid #111; padding-bottom: 14px; margin-bottom: 28px; }
+    .print-header h1 { font-size: 24pt; margin: 0 0 6px 0; font-weight: 700; color: #111; }
+    .print-header .meta { font-size: 10pt; color: #555; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .print-header .meta span { margin-right: 14px; }
+    .print-body { font-size: 12pt; line-height: 1.65; color: #1a1520; max-width: 760px; }
+    .print-body h1, .print-body h2, .print-body h3 { color: #1a1520; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .print-body h1 { font-size: 20pt; margin-top: 1.4em; }
+    .print-body h2 { font-size: 16pt; margin-top: 1.2em; }
+    .print-body h3 { font-size: 13pt; margin-top: 1em; }
+    .print-body pre { background: #f4f0eb; padding: 12px 14px; border-radius: 4px; font-family: 'SF Mono', Consolas, monospace; font-size: 10.5pt; white-space: pre-wrap; }
+    .print-body code { background: #f4f0eb; padding: 1px 5px; border-radius: 3px; font-family: 'SF Mono', Consolas, monospace; font-size: 0.92em; }
+    .print-body blockquote { border-left: 3px solid #7c5cbf; margin: 1em 0; padding: 4px 14px; color: #444; font-style: italic; }
+    .print-body a { color: #5b3f9e; text-decoration: underline; }
+    .print-footer { margin-top: 40px; padding-top: 10px; border-top: 1px solid #ccc; font-size: 9pt; color: #777; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; text-align: center; }
+    @media print {
+      body { padding: 0; }
+      .print-header { page-break-after: avoid; }
+      .print-body h1, .print-body h2, .print-body h3 { page-break-after: avoid; }
+      .print-body pre, .print-body blockquote { page-break-inside: avoid; }
+      .print-footer { page-break-before: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-header">
+    <h1>${escapeHtml(title)}</h1>
+    <div class="meta">
+      <span>📅 ${date}</span>
+      <span>📝 ${wordCount} Wörter</span>
+      ${linkedVideo ? `<span>🎬 ${escapeHtml(linkedVideo)}</span>` : ''}
+    </div>
+  </div>
+  <div class="print-body">${body || '<p style="color:#999;font-style:italic;">(leeres Skript)</p>'}</div>
+  <div class="print-footer">Contentix · ${escapeHtml(title)}</div>
+  <script>window.onload = function() { window.focus(); window.print(); };<\/script>
+</body>
+</html>`);
+  doc.close();
 }
 
 // ─── Markdown ──────────────────────────────────────────────────────────────
