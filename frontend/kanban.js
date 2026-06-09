@@ -433,11 +433,50 @@ function setupStatusPipeline(activeIdx) {
   document.getElementById('statusPipelineBarFill').style.width = fillPct + '%';
 }
 
+async function populateRemakeDropdown(currentCardId) {
+  const sel = document.getElementById('remakeLinkSelect');
+  if (!sel) return;
+  try {
+    // Fetch all videos, filter to originals (parent_video_id is null) + self
+    const res = await fetch(`${API}/videos`);
+    if (!res.ok) return;
+    const all = await res.json();
+    const originals = all.filter(v => !v.parent_video_id || v.id === currentCardId);
+
+    // Sort by published_date DESC (published first), then by created_at DESC
+    originals.sort((a, b) => {
+      const da = a.published_date || a.created_at || '';
+      const db = b.published_date || b.created_at || '';
+      return db.localeCompare(da);
+    });
+
+    sel.innerHTML = '<option value="">— Kein Remake —</option>' +
+      originals.map(v => {
+        const date = v.published_date ? new Date(v.published_date).toLocaleDateString('de-DE', { year: 'numeric', month: '2-digit' }) : (v.created_at ? new Date(v.created_at).toLocaleDateString('de-DE', { year: 'numeric', month: '2-digit' }) : '');
+        const label = `${v.title}${date ? ` (${date})` : ''}`;
+        return `<option value="${v.id}">${escapeHtml(label)}</option>`;
+      }).join('');
+
+    // If editing, set the current value
+    if (currentCardId) {
+      const card = all.find(c => c.id === currentCardId);
+      if (card && card.parent_video_id) {
+        sel.value = card.parent_video_id;
+      }
+    }
+  } catch (err) {
+    console.error('populateRemakeDropdown failed:', err);
+  }
+}
+
 function openCardModal(cardId = null, defaultColumn = 'ideas', prefillDate = null) {
   const modal = document.getElementById('kanbanModal');
   const form = document.getElementById('kanbanForm');
   const modalTitle = document.getElementById('kanbanModalTitle');
   form.reset();
+
+  // Populate remake dropdown (only originals: parent_video_id IS NULL or self)
+  populateRemakeDropdown(cardId);
 
   // Set modal title based on mode
   if (modalTitle) {
@@ -553,7 +592,8 @@ async function handleCardSubmit(e) {
     status: reverseStatusMap[col] || 'planned',
     owner: form.owner?.value || 'dirk',
     youtube_url: form.youtube_url ? form.youtube_url.value : undefined,
-    planned_date: form.planned_date?.value ? (form.planned_time?.value ? form.planned_date.value + 'T' + form.planned_time.value + ':00' : form.planned_date.value) : null
+    planned_date: form.planned_date?.value ? (form.planned_time?.value ? form.planned_date.value + 'T' + form.planned_time.value + ':00' : form.planned_date.value) : null,
+    parent_video_id: form.parent_video_id && form.parent_video_id.value ? form.parent_video_id.value : null
   };
 
   const submitBtn = form.querySelector('button[type="submit"]');

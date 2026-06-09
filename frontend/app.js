@@ -383,6 +383,7 @@ function restoreView() {
   if (view === 'calendar') renderCalendar();
   if (view === 'ideas') { loadCards(); }
   if (view === 'scripts') { initScripts(); }
+  if (view === 'history') { initHistory(); }
   if (view === 'bibliothek') { if (typeof loadBibliothek === 'function') loadBibliothek(); }
 }
 
@@ -405,6 +406,7 @@ function setupNav() {
       if (view === 'bibliothek') { if (typeof loadBibliothek === 'function') loadBibliothek(); }
       if (view === 'ideas') { /* kanban renders on DOMContentLoaded */ }
       if (view === 'scripts') { initScripts(); }
+      if (view === 'history') { initHistory(); }
       // Persist view in cookie
       document.cookie = `contentix_view=${view};path=/;max-age=${60*60*24*30}`;
     });

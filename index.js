@@ -818,16 +818,78 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', version: getVersion(), time: new Date().toISOString() });
 });
 
-// ─── Start ────────────────────────────────────────────────────────────────────
-
-initDB().then(() => {
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Contentix v${getVersion()} running on http://0.0.0.0:${PORT}`);
-  });
-}).catch(err => {
-  console.error('Failed to init DB:', err);
-  process.exit(1);
+// ─── History (HIST v1.0) ────────────────────────────────────────────────────
+app.get('/api/history', (req, res) => {
+  try {
+    const videos = getAll(
+      `SELECT v.*, p.title AS parent_title
+       FROM videos v
+       LEFT JOIN videos p ON v.parent_video_id = p.id
+       WHERE v.status = 'published'
+       ORDER BY v.published_date DESC, v.created_at DESC`
+    );
+    const parsed = videos.map(v => ({
+      ...v,
+      tags: v.tags ? JSON.parse(v.tags) : [],
+      parent_title: v.parent_title || null
+    }));
+    res.json(parsed);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
+
+app.post('/api/videos/:id/archive', (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = getAll('SELECT * FROM videos WHERE id = ?', id)[0];
+    if (!existing) { res.status(404).json({ error: 'Video nicht gefunden' }); return; }
+    run(
+      "UPDATE videos SET status = 'archived', updated_at = ? WHERE id = ?",
+      new Date().toISOString(), id
+    );
+    saveDB();
+    res.json({ ok: true, id, status: 'archived' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/videos/:id/restore', (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = getAll('SELECT * FROM videos WHERE id = ?', id)[0];
+    if (!existing) { res.status(404).json({ error: 'Video nicht gefunden' }); return; }
+    // Restore to 'done' (default for restored videos), unless caller specifies
+    const newStatus = req.body && req.body.status ? req.body.status : 'done';
+    run(
+      'UPDATE videos SET status = ?, updated_at = ? WHERE id = ?',
+      newStatus, new Date().toISOString(), id
+    );
+    saveDB();
+    res.json({ ok: true, id, status: newStatus });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/scripts/:id/restore', (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = getAll('SELECT * FROM scripts WHERE id = ?', id)[0];
+    if (!existing) { res.status(404).json({ error: 'Script nicht gefunden' }); return; }
+    const newStatus = req.body && req.body.status ? req.body.status : 'draft';
+    run(
+      'UPDATE scripts SET status = ?, updated_at = ? WHERE id = ?',
+      newStatus, new Date().toISOString(), id
+    );
+    saveDB();
+    res.json({ ok: true, id, status: newStatus });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── Link script to video ────────────────────────────────────────────────────
 app.patch('/api/scripts/:id/link', (req, res) => {
   try {
@@ -843,4 +905,15 @@ app.patch('/api/scripts/:id/link', (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ─── Start ────────────────────────────────────────────────────────────────────
+
+initDB().then(() => {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Contentix v${getVersion()} running on http://0.0.0.0:${PORT}`);
+  });
+}).catch(err => {
+  console.error('Failed to init DB:', err);
+  process.exit(1);
 });
