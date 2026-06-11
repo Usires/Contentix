@@ -358,23 +358,24 @@ async function pollResearchJob(jobId, { intervalMs = 2000, timeoutMs = 300000 } 
   throw new Error('Vidi-Job Timeout (5 Min) — schau in /api/research/' + jobId);
 }
 
-// Modal mit Vidis Research-Report. Markdown-light rendering.
+// Modal mit Vidis Research-Report. Verwendet App-Modal-Pattern (.modal > .modal__backdrop + .modal__box).
 function showResearchResultModal(cardId, text, job) {
   const modal = document.createElement('div');
-  modal.className = 'modal-overlay';
+  modal.className = 'modal modal--research';
   modal.innerHTML = `
-    <div class="modal" style="max-width:800px;max-height:85vh;display:flex;flex-direction:column">
+    <div class="modal__backdrop"></div>
+    <div class="modal__box modal__box--wide">
       <div class="modal__header">
-        <h3>🔭 Vidi Research-Report</h3>
+        <h3 class="modal__title">🔭 Vidi Research-Report</h3>
         <button class="modal__close" aria-label="Schließen">×</button>
       </div>
-      <div class="modal__body" style="overflow:auto;padding:1.2rem 1.5rem;flex:1">
-        <div class="research-meta" style="font-size:0.85em;color:var(--text-muted);margin-bottom:1rem">
+      <div class="modal__body modal__body--report">
+        <div class="research-meta">
           Job <code>${job.jobId.slice(0,8)}…</code> · ${new Date(job.finishedAt).toLocaleString('de-DE')} · ${job.result?.summary || ''}
         </div>
-        <pre class="research-report" style="white-space:pre-wrap;font-family:system-ui;line-height:1.55;font-size:0.95em">${escapeHtml(text)}</pre>
+        <pre class="research-report">${escapeHtml(text)}</pre>
       </div>
-      <div class="modal__footer">
+      <div class="modal__footer modal__footer--actions">
         <button class="btn btn--secondary" data-action="close">Schließen</button>
         <button class="btn btn--primary" data-action="open-card">Karte öffnen</button>
       </div>
@@ -385,7 +386,7 @@ function showResearchResultModal(cardId, text, job) {
   modal.querySelector('.modal__close').onclick = close;
   modal.querySelector('[data-action="close"]').onclick = close;
   modal.querySelector('[data-action="open-card"]').onclick = () => { close(); openCardModal(cardId); };
-  modal.addEventListener('click', e => { if (e.target === modal) close(); });
+  modal.querySelector('.modal__backdrop').onclick = close;
 }
 
 function escapeHtml(s) {

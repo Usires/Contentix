@@ -2152,3 +2152,101 @@ kbd {
   }
   @page { margin: 18mm; }
 }
+
+/* ─── Research-Result-Modal (v0.10.0) ─────────────────────────────────────────────── */
+
+.modal--research {
+  z-index: 1100; /* über normalen Modals */
+}
+
+.modal__box--wide {
+  max-width: 880px;
+  width: 92%;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0; /* Header/Body/Footer haben eigenes Padding */
+  overflow: hidden;
+}
+
+.modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px 14px;
+  border-bottom: 1px solid var(--border, rgba(0,0,0,0.08));
+  flex-shrink: 0;
+}
+
+.modal__close {
+  background: transparent;
+  border: 0;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--text-secondary, #666);
+  padding: 4px 10px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+.modal__close:hover {
+  background: var(--bg-hover, rgba(0,0,0,0.05));
+  color: var(--text-primary, #111);
+}
+
+.modal__body--report {
+  padding: 18px 24px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0; /* wichtig für flex-scroll in Safari */
+}
+
+.research-meta {
+  font-size: 0.82em;
+  color: var(--text-muted, #777);
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--border, rgba(0,0,0,0.08));
+}
+.research-meta code {
+  background: var(--bg-code, rgba(124, 92, 191, 0.1));
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.92em;
+}
+
+.research-report {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono, ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace);
+  line-height: 1.55;
+  font-size: 0.88rem;
+  color: var(--text-primary, #1a1a1a);
+  background: var(--bg-code-block, rgba(0,0,0,0.03));
+  padding: 14px 16px;
+  border-radius: 8px;
+  margin: 0;
+  border: 1px solid var(--border, rgba(0,0,0,0.06));
+  max-height: none; /* Modal scrollt, nicht der pre */
+}
+
+.modal__footer--actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--border, rgba(0,0,0,0.08));
+  flex-shrink: 0;
+  background: var(--bg-surface-soft, rgba(0,0,0,0.02));
+}
+
+/* Dark-Theme Anpassungen (für iceblue/violet/ocean etc. mit dunklen Sidebars) */
+@media (prefers-color-scheme: dark) {
+  .research-report {
+    background: rgba(255,255,255,0.04);
+    border-color: rgba(255,255,255,0.08);
+  }
+  .modal__footer--actions {
+    background: rgba(255,255,255,0.02);
+  }
+}
