@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0-alpha] — 2026-06-11
+
+### Added
+- **🔭 1-Klick-Nix-Research im Kanban-Board**: 'Nix'-Action-Button auf jeder Card triggert Vidi 🔭 direkt aus dem Browser. End-to-End: Contentix → OpenClaw → Vidi → Skript-Push → Result-Modal.
+- **`research_jobs`-Tabelle**: Tracking für Vidi/Nix-Spawn-Jobs (job_id, video_id, agent_id, status, progress_message, result, error, started/finished_at).
+- **REST-Endpoints**:
+  - `POST /api/research/:videoId` — Spawn Vidi asynchron, Body `{ agent?, brief? }`, Response `{ jobId, status: 'pending' }`
+  - `GET /api/research/:jobId` — Polling-Endpoint für Frontend (Status + Result + Job-Meta)
+  - `GET /api/research?videoId=&status=` — Job-Liste mit Filtern
+- **🔭 Button im Card-Markup** (`kanban.js`): hover-reveal auf jeder Card, Action-Handler in `triggerNixResearch()`.
+- **Polling-Pattern**: 2s-Intervall, 5-Min-Timeout, persistent Toast während Vidi läuft, Result-Modal mit Job-Meta und Report-Text.
+- **`showConfirm()` / `hideToast()` in utils.js**: Promise-basierte Confirm-Dialogs, Toast-API erweitert (durationMs=0 = persistent).
+
+### Known Limitations
+- Progress-Anzeige zeigt nur statisches 'Spawning…' während Vidi läuft (kein Sub-Progress-Update von Vidi selbst).
+- Modal-Report ist text-only (kein Markdown-Rendering, keine Tabellen).
+- Kein Cooldown gegen versehentliche Doppel-Klicks (Vidi-Trigger ist sofortig).
+- Brief wird aus Video-Daten auto-generiert; Custom-Brief per Body nur für manuelle API-Calls.
+
 ## [0.9.9] — 2026-06-11
 
 ### Added
