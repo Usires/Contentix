@@ -178,3 +178,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - All hardcoded color values replaced with CSS variables (Magic Numbers cleaned up)
 
+
+## [0.10.1] - 2026-06-11
+
+### Added
+- **Markdown-Rendering im Vidi-Research-Modal**: Reports werden mit `marked.js` + `DOMPurify` als HTML gerendert. Headings, Listen, Tabellen, Code-Blöcke, Blockquotes, Links funktionieren jetzt.
+- **Dark-Theme-Support** für Markdown-Body (Tabellen, Headings, Blockquotes, hr).
+
+### Changed
+- Vidi-Report-Modal: `<pre>` durch `<div class="markdown-body">` ersetzt. Monospace-Styles auf Markdown-Default-Styles umgestellt.
+- Frontend-Lib-Liste: `dompurify@3.0.6` zu index.html hinzugefügt (CDN).
+
+### Removed
+- `.research-report`-CSS-Klasse (war für `<pre>`-Style, jetzt ersetzt durch `.markdown-body`).
+

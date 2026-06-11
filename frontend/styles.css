@@ -2215,20 +2215,85 @@ kbd {
   font-size: 0.92em;
 }
 
-.research-report {
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: var(--font-mono, ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace);
-  line-height: 1.55;
-  font-size: 0.88rem;
+/* Markdown-Body — verwendet für gerenderten Vidi-Report (marked + DOMPurify) */
+.markdown-body {
+  font-family: var(--font-sans, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+  font-size: 0.92rem;
+  line-height: 1.6;
   color: var(--text-primary, #1a1a1a);
-  background: var(--bg-code-block, rgba(0,0,0,0.03));
-  padding: 14px 16px;
-  border-radius: 8px;
-  margin: 0;
-  border: 1px solid var(--border, rgba(0,0,0,0.06));
-  max-height: none; /* Modal scrollt, nicht der pre */
+  padding: 16px 20px;
 }
+.markdown-body h1, .markdown-body h2, .markdown-body h3 {
+  margin: 1.2em 0 0.5em;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.markdown-body h1 { font-size: 1.4rem; border-bottom: 1px solid var(--border, rgba(0,0,0,0.1)); padding-bottom: 0.3em; }
+.markdown-body h2 { font-size: 1.2rem; }
+.markdown-body h3 { font-size: 1.05rem; }
+.markdown-body h4, .markdown-body h5, .markdown-body h6 { font-size: 1rem; font-weight: 600; margin: 1em 0 0.4em; }
+.markdown-body p { margin: 0.6em 0; }
+.markdown-body ul, .markdown-body ol { margin: 0.6em 0; padding-left: 1.6em; }
+.markdown-body li { margin: 0.25em 0; }
+.markdown-body code {
+  font-family: var(--font-mono, ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace);
+  background: var(--bg-code, rgba(124, 92, 191, 0.1));
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.88em;
+}
+.markdown-body pre {
+  background: var(--bg-code-block, rgba(0,0,0,0.04));
+  padding: 12px 14px;
+  border-radius: 6px;
+  overflow-x: auto;
+  border: 1px solid var(--border, rgba(0,0,0,0.06));
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.markdown-body pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+.markdown-body table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  font-size: 0.88rem;
+  width: auto;
+  max-width: 100%;
+}
+.markdown-body th, .markdown-body td {
+  border: 1px solid var(--border, rgba(0,0,0,0.12));
+  padding: 6px 10px;
+  text-align: left;
+}
+.markdown-body th {
+  background: var(--bg-surface-soft, rgba(0,0,0,0.03));
+  font-weight: 600;
+}
+.markdown-body blockquote {
+  margin: 0.8em 0;
+  padding: 4px 14px;
+  border-left: 3px solid var(--accent, #7c5cbf);
+  background: var(--bg-surface-soft, rgba(0,0,0,0.02));
+  color: var(--text-secondary, #555);
+  font-style: italic;
+}
+.markdown-body a {
+  color: var(--accent, #7c5cbf);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+.markdown-body a:hover { border-bottom-color: var(--accent, #7c5cbf); }
+.markdown-body hr {
+  border: 0;
+  border-top: 1px solid var(--border, rgba(0,0,0,0.08));
+  margin: 1.2em 0;
+}
+.markdown-body strong { font-weight: 600; }
+.markdown-body em { font-style: italic; }
 
 .modal__footer--actions {
   display: flex;
@@ -2242,11 +2307,25 @@ kbd {
 
 /* Dark-Theme Anpassungen (für iceblue/violet/ocean etc. mit dunklen Sidebars) */
 @media (prefers-color-scheme: dark) {
-  .research-report {
-    background: rgba(255,255,255,0.04);
-    border-color: rgba(255,255,255,0.08);
-  }
   .modal__footer--actions {
     background: rgba(255,255,255,0.02);
+  }
+  .markdown-body {
+    color: var(--text-primary, #e4e4e4);
+  }
+  .markdown-body th, .markdown-body td {
+    border-color: rgba(255,255,255,0.12);
+  }
+  .markdown-body th {
+    background: rgba(255,255,255,0.04);
+  }
+  .markdown-body blockquote {
+    background: rgba(255,255,255,0.03);
+  }
+  .markdown-body hr {
+    border-top-color: rgba(255,255,255,0.08);
+  }
+  .markdown-body h1 {
+    border-bottom-color: rgba(255,255,255,0.1);
   }
 }

@@ -386,7 +386,7 @@ function showResearchResultModal(cardId, text, job) {
         <div class="research-meta">
           Job <code>${job.jobId.slice(0,8)}…</code> · ${new Date(job.finishedAt).toLocaleString('de-DE')} · ${job.result?.summary || ''}
         </div>
-        <pre class="research-report">${escapeHtml(text)}</pre>
+        <div class="markdown-body">${DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true, headerIds: false, mangle: false }))}</div>
       </div>
       <div class="modal__footer modal__footer--actions">
         <button class="btn btn--secondary" data-action="close">Schließen</button>
