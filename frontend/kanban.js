@@ -314,7 +314,8 @@ async function archiveCard(cardId) {
 
 async function triggerNixResearch(cardId) {
   showToast('Nix Research für Karte #' + cardId + ' — kommt bald! 🐧', 'info');
-  // TODO: Connect to actual research workflow (n8n/LILAC pipeline)
+  // Status (2026-06-11): Button bleibt als UI-Marker, bis wir v0.10-Architektur
+  // für „Browser → Contentix → OpenClaw → Vidi" haben. Siehe MAKINGOF.md / SPEC.md.
 }
 
 async function duplicateCard(cardId) {
