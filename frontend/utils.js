@@ -61,13 +61,58 @@ function isTypingInField(e) {
 
 // Show a transient toast at the bottom of the screen. Used to give
 // feedback on shortcut actions (e.g. "Card created"). Auto-dismisses.
+// Pass durationMs=0 for a persistent toast (call hideToast() to dismiss).
 function showToast(message, durationMs = 2500) {
   let toast = document.getElementById('kanbanToast');
-  if (!toast) return;
+  if (!toast) return null;
   toast.textContent = message;
   toast.classList.add('kanban-toast--visible');
   clearTimeout(showToast._timer);
-  showToast._timer = setTimeout(() => {
-    toast.classList.remove('kanban-toast--visible');
-  }, durationMs);
+  if (durationMs > 0) {
+    showToast._timer = setTimeout(() => {
+      toast.classList.remove('kanban-toast--visible');
+    }, durationMs);
+  }
+  return toast;
+}
+
+// Manually hide the current toast. No-op if not visible.
+function hideToast() {
+  const toast = document.getElementById('kanbanToast');
+  if (!toast) return;
+  toast.classList.remove('kanban-toast--visible');
+  clearTimeout(showToast._timer);
+}
+
+// Promise-basierter Confirm-Dialog. Returns true wenn "OK" geklickt.
+// Verwendet das bestehende Confirm-Modal falls vorhanden, sonst einfaches window.confirm-Fallback.
+function showConfirm(message, okLabel = 'OK') {
+  return new Promise(resolve => {
+    // Bevorzugt das app.js-Confirm-Modal falls vorhanden
+    const overlay = document.getElementById('confirmOverlay');
+    const textEl = document.getElementById('confirmText');
+    const okBtn = document.getElementById('confirmOk');
+    const cancelBtn = document.getElementById('confirmCancel');
+    if (overlay && textEl && okBtn && cancelBtn) {
+      textEl.textContent = message;
+      const okLabelEl = okBtn.querySelector('.btn__label') || okBtn;
+      okLabelEl.textContent = okLabel;
+      overlay.classList.add('confirm-overlay--visible');
+      const cleanup = () => {
+        overlay.classList.remove('confirm-overlay--visible');
+        okBtn.removeEventListener('click', onOk);
+        cancelBtn.removeEventListener('click', onCancel);
+        overlay.removeEventListener('click', onBackdrop);
+      };
+      const onOk = () => { cleanup(); resolve(true); };
+      const onCancel = () => { cleanup(); resolve(false); };
+      const onBackdrop = e => { if (e.target === overlay) onCancel(); };
+      okBtn.addEventListener('click', onOk);
+      cancelBtn.addEventListener('click', onCancel);
+      overlay.addEventListener('click', onBackdrop);
+    } else {
+      // Fallback
+      resolve(window.confirm(message));
+    }
+  });
 }

@@ -112,6 +112,18 @@ async function initDB() {
     started_at TEXT,
     finished_at TEXT
   )`);
+  // Migration: research_jobs for Vidi/Nix-Research-Trigger (v0.10, 2026-06-11)
+  db.run(`CREATE TABLE IF NOT EXISTS research_jobs (
+    job_id TEXT PRIMARY KEY,
+    video_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    progress_message TEXT DEFAULT '',
+    result TEXT,
+    error TEXT,
+    started_at TEXT DEFAULT (datetime('now')),
+    finished_at TEXT
+  )`);
   saveDB();
 }
 
@@ -908,6 +920,145 @@ app.patch('/api/scripts/:id/link', (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// ─── Research Jobs (Vidi/Nix-Spawn, v0.10 2026-06-11) ────────────────────────────────
+
+// POST /api/research/:videoId
+// Triggert einen OpenClaw-Agent (Default: youtubebot=Vidi) als Research-Job.
+// Body: { agent?: string, brief?: string }
+// Antwortet sofort mit { jobId, status:'pending' }.
+// Vidi-Job läuft asynchron im Hintergrund, Status-Polling via /api/research/:jobId.
+app.post('/api/research/:videoId', (req, res) => {
+  try {
+    const video = get('SELECT * FROM videos WHERE id = ?', req.params.videoId);
+    if (!video) { res.status(404).json({ error: 'Video nicht gefunden' }); return; }
+
+    const { agent = 'youtubebot', brief = '' } = req.body || {};
+    const jobId = require('crypto').randomUUID();
+
+    run(
+      `INSERT INTO research_jobs (job_id, video_id, agent_id, status, progress_message)
+       VALUES (?, ?, ?, 'pending', 'Job queued')`,
+      jobId, req.params.videoId, agent
+    );
+
+    const finalBrief = brief.trim() || buildVidiBrief(video);
+
+    setImmediate(() => runResearchJob(jobId, agent, finalBrief));
+
+    res.json({ jobId, status: 'pending', videoId: req.params.videoId, agent });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/research/:jobId
+// Polling-Endpoint für Frontend.
+app.get('/api/research/:jobId', (req, res) => {
+  try {
+    const job = get('SELECT * FROM research_jobs WHERE job_id = ?', req.params.jobId);
+    if (!job) { res.status(404).json({ error: 'Job nicht gefunden' }); return; }
+    res.json({
+      jobId: job.job_id,
+      videoId: job.video_id,
+      agentId: job.agent_id,
+      status: job.status,
+      progressMessage: job.progress_message,
+      error: job.error,
+      startedAt: job.started_at,
+      finishedAt: job.finished_at,
+      result: job.result ? JSON.parse(job.result) : null
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/research?videoId=...&status=...
+// Liste Research-Jobs.
+app.get('/api/research', (req, res) => {
+  try {
+    const { videoId, status, limit = 20 } = req.query;
+    let sql = 'SELECT * FROM research_jobs WHERE 1=1';
+    const params = [];
+    if (videoId) { sql += ' AND video_id = ?'; params.push(videoId); }
+    if (status)  { sql += ' AND status = ?';   params.push(status); }
+    sql += ' ORDER BY started_at DESC LIMIT ?';
+    params.push(parseInt(limit, 10) || 20);
+    const rows = getAll(sql, ...params);
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Helper: baut Default-Brief aus Video-Daten
+function buildVidiBrief(video) {
+  const lines = [
+    `## Recherche-Auftrag: ${video.title}`,
+    '',
+    `**Contentix-Video-ID:** ${video.id}`,
+    `**Status:** ${video.status}`,
+    video.planned_date ? `**Geplant:** ${video.planned_date}` : null,
+    `**Format:** ${video.video_format || 'longform'}`,
+    '',
+    '## Briefing',
+    video.notes || video.description || '(kein Briefing hinterlegt)',
+    '',
+    '## Deine Aufgabe',
+    '1. vidIQ-Recherche: Outliers, Keywords, Comments der letzten Dirk-Linux-Gaming-Videos, Reverse-Check auf Doppel-Themen.',
+    '2. Skript-Entwurf V1 erstellen (~1200-1500 Wörter, deutsch, locker, "Ich zeig dir…" Tonalität).',
+    '3. Konkrete Terminal-Befehle mitliefern, echte Spiele als Beispiele.',
+    '4. 3 Hook-Varianten + Empfehlung, 3 Titel-Varianten, 2 Thumbnail-Ideen.',
+    '5. Skript via Contentix-API pushen: POST /api/scripts mit video_id-Verlinkung.',
+    '6. Status NICHT automatisch ändern — wartet auf Dirks Bestätigung.',
+    '',
+    '## Push-Format (dein letzter Block)',
+    'Schreibe einen klaren Report: TEIL A (Recherche-Zusammenfassung), TEIL B (Skript), TEIL C (Push-Bestätigung), TEIL D (offene Fragen).',
+  ].filter(Boolean);
+  return lines.join('\n');
+}
+
+// Asynchroner OpenClaw-Spawn. Aktualisiert research_jobs mit Status+Result.
+function runResearchJob(jobId, agentId, brief) {
+  run('UPDATE research_jobs SET status = ?, progress_message = ? WHERE job_id = ?',
+      'running', `Spawning OpenClaw agent ${agentId}…`, jobId);
+
+  const { exec } = require('child_process');
+  // Expliziter Pfad — systemd-Service-User 'dirk' hat openclaw nicht im PATH
+  const OPENCLAW_BIN = '/home/dirk/.npm-global/bin/openclaw';
+  const cmd = `${OPENCLAW_BIN} agent --agent ${agentId} --message ${shellEscape(brief)} --json`;
+  const cwd = '/home/dirk';
+
+  console.log(`[research] Job ${jobId}: spawning ${agentId} (${brief.length} chars)`);
+  console.log(`[research] cmd: ${OPENCLAW_BIN} agent --agent ${agentId} --message <…> --json`);
+
+  exec(cmd, { cwd, maxBuffer: 10 * 1024 * 1024, timeout: 15 * 60 * 1000 }, (err, stdout, stderr) => {
+    if (err) {
+      console.error(`[research] Job ${jobId} failed:`, err.message);
+      run('UPDATE research_jobs SET status = ?, error = ?, finished_at = datetime("now") WHERE job_id = ?',
+          'error', (err.message || 'unknown error').slice(0, 2000), jobId);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(stdout);
+      const summary = parsed.summary || parsed.status || 'completed';
+      const text = parsed.result?.payloads?.[0]?.text || parsed.result?.text || '';
+      run('UPDATE research_jobs SET status = ?, progress_message = ?, result = ?, finished_at = datetime("now") WHERE job_id = ?',
+          'done', 'Completed', JSON.stringify({ summary, text, raw: parsed }), jobId);
+      console.log(`[research] Job ${jobId} completed (${summary})`);
+    } catch (parseErr) {
+      console.error(`[research] Job ${jobId} parse error:`, parseErr.message);
+      run('UPDATE research_jobs SET status = ?, error = ?, finished_at = datetime("now") WHERE job_id = ?',
+          'error', 'Failed to parse OpenClaw output: ' + (parseErr.message || '').slice(0, 1000), jobId);
+    }
+  });
+}
+
+// Shell-escape (single-quoted, escapes embedded single quotes)
+function shellEscape(s) {
+  return "'" + String(s).replace(/'/g, "'\\''") + "'";
+}
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 

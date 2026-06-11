@@ -143,6 +143,7 @@ function renderCard(card) {
     <div class="kanban-card__footer">
       <div class="kanban-card__actions">
         <button class="kanban-card__action" data-action="edit" data-id="${card.id}" title="Bearbeiten">Bearbeiten</button>
+        <button class="kanban-card__action kanban-card__action--nix" data-action="nix-research" data-id="${card.id}" title="Vidi 🔭 Research starten">🔭 Nix</button>
         <button class="kanban-card__action" data-action="delete" data-id="${card.id}" title="Löschen">Löschen</button>
       </div>
     </div>
@@ -313,9 +314,82 @@ async function archiveCard(cardId) {
 }
 
 async function triggerNixResearch(cardId) {
-  showToast('Nix Research für Karte #' + cardId + ' — kommt bald! 🐧', 'info');
-  // Status (2026-06-11): Button bleibt als UI-Marker, bis wir v0.10-Architektur
-  // für „Browser → Contentix → OpenClaw → Vidi" haben. Siehe MAKINGOF.md / SPEC.md.
+  let toastId;
+  try {
+    // 1) Job triggern (Vidi 🔭, ca. 30–50 vidIQ-Credits, 1–3 Min)
+    const res = await fetch(`${API}/research/${cardId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent: 'youtubebot' })
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    const { jobId } = await res.json();
+    toastId = showToast(`🔭 Vidi forscht… (Job ${jobId.slice(0,8)}…)`, 0);
+
+    // 2) Polling alle 2s, max 5 Min
+    const result = await pollResearchJob(jobId);
+    if (toastId) hideToast();
+
+    // 3) Result anzeigen
+    if (result.status === 'done') {
+      const text = result.result?.text || '(kein Text)';
+      showResearchResultModal(cardId, text, result);
+      showToast('✅ Vidi fertig!', 3000);
+    } else if (result.status === 'error') {
+      showToast(`❌ Vidi-Fehler: ${result.error || 'unbekannt'}`, 8000);
+    }
+  } catch (err) {
+    if (toastId) hideToast();
+    showToast('Fehler: ' + err.message, 5000);
+    console.error('[triggerNixResearch]', err);
+  }
+}
+
+// Polling-Helper: ruft /api/research/:jobId alle 2s, gibt finalen Status zurück.
+async function pollResearchJob(jobId, { intervalMs = 2000, timeoutMs = 300000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const res = await fetch(`${API}/research/${jobId}`);
+    if (!res.ok) throw new Error(`Polling HTTP ${res.status}`);
+    const job = await res.json();
+    if (job.status === 'done' || job.status === 'error') return job;
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  throw new Error('Vidi-Job Timeout (5 Min) — schau in /api/research/' + jobId);
+}
+
+// Modal mit Vidis Research-Report. Markdown-light rendering.
+function showResearchResultModal(cardId, text, job) {
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
+    <div class="modal" style="max-width:800px;max-height:85vh;display:flex;flex-direction:column">
+      <div class="modal__header">
+        <h3>🔭 Vidi Research-Report</h3>
+        <button class="modal__close" aria-label="Schließen">×</button>
+      </div>
+      <div class="modal__body" style="overflow:auto;padding:1.2rem 1.5rem;flex:1">
+        <div class="research-meta" style="font-size:0.85em;color:var(--text-muted);margin-bottom:1rem">
+          Job <code>${job.jobId.slice(0,8)}…</code> · ${new Date(job.finishedAt).toLocaleString('de-DE')} · ${job.result?.summary || ''}
+        </div>
+        <pre class="research-report" style="white-space:pre-wrap;font-family:system-ui;line-height:1.55;font-size:0.95em">${escapeHtml(text)}</pre>
+      </div>
+      <div class="modal__footer">
+        <button class="btn btn--secondary" data-action="close">Schließen</button>
+        <button class="btn btn--primary" data-action="open-card">Karte öffnen</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  const close = () => modal.remove();
+  modal.querySelector('.modal__close').onclick = close;
+  modal.querySelector('[data-action="close"]').onclick = close;
+  modal.querySelector('[data-action="open-card"]').onclick = () => { close(); openCardModal(cardId); };
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 async function duplicateCard(cardId) {
