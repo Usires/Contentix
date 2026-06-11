@@ -226,6 +226,17 @@ app.get('/api/scripts', (req, res) => {
   }
 });
 
+// IMPORTANT: static routes like /api/scripts/folders MUST be defined BEFORE /api/scripts/:id
+// otherwise Express treats "folders" as an :id parameter and returns 404.
+app.get('/api/scripts/folders', (req, res) => {
+  try {
+    const rows = getAll('SELECT DISTINCT folder FROM scripts ORDER BY folder ASC');
+    res.json(rows.map(r => r.folder));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/scripts/:id', (req, res) => {
   try {
     const script = get('SELECT * FROM scripts WHERE id = ?', req.params.id);
@@ -301,15 +312,6 @@ app.post('/api/scripts/import', (req, res) => {
     const now = new Date().toISOString();
     run(`INSERT INTO scripts (id, title, slug, folder, status, content, created_at, updated_at) VALUES (?, ?, ?, ?, 'draft', ?, ?, ?)`, id, title, slug, folder, content, now, now);
     res.json({ id, title, slug, status: 'ok' });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.get('/api/scripts/folders', (req, res) => {
-  try {
-    const rows = getAll('SELECT DISTINCT folder FROM scripts ORDER BY folder ASC');
-    res.json(rows.map(r => r.folder));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

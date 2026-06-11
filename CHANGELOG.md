@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.9] — 2026-06-11
+
+### Added
+- **📜 History-Funktion** (HIST v1.0): Eigene History-View mit Liste aller archivierten Videos und Skripte (`GET /api/history`, `POST /api/videos/:id/archive`, `POST /api/videos/:id/restore`, `POST /api/scripts/:id/restore`). Soft-Archive statt hartem DELETE — Audit-Trail für gelöschte Inhalte.
+- **🐧 Nix-Owner-Spalte** (`videos.owner`): Migration ergänzt `owner TEXT DEFAULT 'dirk'`. Erlaubt künftig mehrfache Agent-Identitäten (Nix, Vidi, Dirk) pro Video-Card.
+- **`--text-on-dark-secondary` token** (per-theme): A new design token for secondary text on dark surfaces (e.g. sidebar). The previous `--text-secondary` was designed for light backgrounds and disappeared on dark. The new token is defined per-theme at ~78% brightness of `--text-on-dark` (violet, green, gold, warmgray, iceblue depending on theme).
+- **🐛 Bugfix: `/api/scripts/folders` Route-Reihenfolge**: Die statische Route wurde von `/api/scripts/:id` abgefangen, weil sie danach definiert war. Verschiebt + Kommentar ergänzt, damit dieser Fehler nicht wiederkehrt.
+- **🧹 Cleanup: `frontend/kanban.js.bak` entfernt** — 7 Wochen alt, vor Sidebar-Rework, Dead Code.
+
+### Changed
+- **Sidebar spacing between channel name and next-video widget**: added 16px extra `margin-top` on `.next-video-widget` when it follows the channel name. They were too tight, now have a bit more breathing room. Other sidebar spacings (widget → "Navigation" heading → nav items) remain unchanged.
+- **Sidebar text uses `--text-on-dark-secondary`**: tagline, stat labels, vidiq status and footer all switched to the new token. Opacity bumped to 1 where it was 0.85 because the new colors are already desaturated appropriately.
+- **Versionskonsistenz**: `package.json` auf `0.9.9` angehoben (lief drifteich hinterher zu `/api/health` und `npm`-Reporting).
+
 ## [0.9.8] — 2026-06-09
 
 ### Added
@@ -16,15 +30,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`@media print` Stylesheet** in `styles.css`: Versteckt Sidebar/Toolbar/Editor-Footer/Textarea/List-Panel, wenn man im Skript-Editor Ctrl+P drückt — nur das gerenderte Markdown wird gedruckt.
 
 ## [Unreleased]
-
-### Added
-- **`--text-on-dark-secondary` token** (per-theme): A new design token for secondary text on dark surfaces (e.g. sidebar). The previous `--text-secondary` was designed for light backgrounds and disappeared on dark. The new token is defined per-theme at ~78% brightness of `--text-on-dark` (violet, green, gold, warmgray, iceblue depending on theme).
-
-### Changed
-- **Sidebar spacing between channel name and next-video widget**: added 16px extra `margin-top` on `.next-video-widget` when it follows the channel name. They were too tight, now have a bit more breathing room. Other sidebar spacings (widget → "Navigation" heading → nav items) remain unchanged.
-
-### Changed
-- **Sidebar text uses `--text-on-dark-secondary`**: tagline, stat labels, vidiq status and footer all switched to the new token. Opacity bumped to 1 where it was 0.85 because the new colors are already desaturated appropriately.
 
 ## [0.9.5] — 2026-06-03
 
