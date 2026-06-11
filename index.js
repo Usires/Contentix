@@ -17,6 +17,15 @@ const PORT = 3038;
 const API = `http://localhost:${PORT}/api`;
 
 app.use(express.json());
+
+// Global JSON error handler (vor allen Routes): kaputtes JSON -> sauberes 400 JSON
+app.use((err, req, res, next) => {
+  if (err && err.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'Invalid JSON body', detail: err.message });
+  }
+  next(err);
+});
+
 app.use(express.static(path.join(__dirname, 'frontend')));
 
 // ─── Database Setup ────────────────────────────────────────────────────────────
@@ -124,6 +133,10 @@ async function initDB() {
     started_at TEXT DEFAULT (datetime('now')),
     finished_at TEXT
   )`);
+  // Performance-Index für GET /api/research?videoId=X
+  try { db.run(`CREATE INDEX IF NOT EXISTS idx_research_jobs_video_id ON research_jobs(video_id)`); } catch(e) {}
+  // Index für Status-Filter (List-View)
+  try { db.run(`CREATE INDEX IF NOT EXISTS idx_research_jobs_status ON research_jobs(status)`); } catch(e) {}
   saveDB();
 }
 
@@ -933,6 +946,21 @@ app.post('/api/research/:videoId', (req, res) => {
     const video = get('SELECT * FROM videos WHERE id = ?', req.params.videoId);
     if (!video) { res.status(404).json({ error: 'Video nicht gefunden' }); return; }
 
+    // Cooldown: wenn für dieses Video schon ein Job läuft, kein neuer.
+    const existing = get(
+      `SELECT job_id, status FROM research_jobs
+       WHERE video_id = ? AND status IN ('pending','running')
+       ORDER BY started_at DESC LIMIT 1`,
+      req.params.videoId
+    );
+    if (existing) {
+      return res.status(409).json({
+        error: 'Research-Job läuft bereits für dieses Video',
+        jobId: existing.job_id,
+        status: existing.status
+      });
+    }
+
     const { agent = 'youtubebot', brief = '' } = req.body || {};
     const jobId = require('crypto').randomUUID();
 
@@ -947,6 +975,27 @@ app.post('/api/research/:videoId', (req, res) => {
     setImmediate(() => runResearchJob(jobId, agent, finalBrief));
 
     res.json({ jobId, status: 'pending', videoId: req.params.videoId, agent });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/research/:jobId
+// Bricht einen laufenden Vidi-Job ab. Setzt Status auf 'cancelled'.
+// Hinweis: Der OpenClaw-Spawn selbst kann nicht direkt terminiert werden (kein PID-Tracking),
+// aber der Status-Flag verhindert, dass der Frontend-Poll weiter wartet.
+app.delete('/api/research/:jobId', (req, res) => {
+  try {
+    const job = get('SELECT * FROM research_jobs WHERE job_id = ?', req.params.jobId);
+    if (!job) { res.status(404).json({ error: 'Job nicht gefunden' }); return; }
+    if (job.status !== 'pending' && job.status !== 'running') {
+      return res.status(409).json({ error: `Job ist bereits ${job.status}`, job });
+    }
+    run(
+      `UPDATE research_jobs SET status = 'cancelled', progress_message = 'Vom User abgebrochen', finished_at = datetime('now') WHERE job_id = ?`,
+      req.params.jobId
+    );
+    res.json({ status: 'cancelled', jobId: req.params.jobId });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -992,8 +1041,17 @@ app.get('/api/research', (req, res) => {
   }
 });
 
-// Helper: baut Default-Brief aus Video-Daten
+// Helper: baut Default-Brief aus Video-Daten — status-aware
 function buildVidiBrief(video) {
+  const statusHints = {
+    planned:   'Status ist **planned** (nur Idee, noch keine Recherche). Du bist die ERSTE Recherche dazu.',
+    research:  'Status ist **research** (Recherche-Phase läuft). Vielleicht existieren schon Vidi-Reports zu ähnlichen Themen — check via vidiq_channel_videos und vidiq_outliers.',
+    script:    'Status ist **script** (Skript-Phase). User will ggf. Skript-V2 oder neue Hooks. Skript liegt schon in Contentix.',
+    recording: 'Status ist **recording** (wird aufgenommen). Wahrscheinlich Revisions-Wunsch zu Skript oder Thumbnail.',
+    done:      'Status ist **done** (fertig geschnitten). Wahrscheinlich Post-Production-Themen (Thumbnail, Titel-Optimierung).',
+    published: 'Status ist **published** (live). Wahrscheinlich Follow-up-Idee oder Performance-Analyse.'
+  };
+
   const lines = [
     `## Recherche-Auftrag: ${video.title}`,
     '',
@@ -1001,6 +1059,8 @@ function buildVidiBrief(video) {
     `**Status:** ${video.status}`,
     video.planned_date ? `**Geplant:** ${video.planned_date}` : null,
     `**Format:** ${video.video_format || 'longform'}`,
+    '',
+    statusHints[video.status] || `Status ist **${video.status}** (unbekannt — sei vorsichtig).`,
     '',
     '## Briefing',
     video.notes || video.description || '(kein Briefing hinterlegt)',
@@ -1011,7 +1071,7 @@ function buildVidiBrief(video) {
     '3. Konkrete Terminal-Befehle mitliefern, echte Spiele als Beispiele.',
     '4. 3 Hook-Varianten + Empfehlung, 3 Titel-Varianten, 2 Thumbnail-Ideen.',
     '5. Skript via Contentix-API pushen: POST /api/scripts mit video_id-Verlinkung.',
-    '6. Status NICHT automatisch ändern — wartet auf Dirks Bestätigung.',
+    '6. Video-Status NICHT automatisch ändern — wartet auf Dirks Bestätigung.',
     '',
     '## Push-Format (dein letzter Block)',
     'Schreibe einen klaren Report: TEIL A (Recherche-Zusammenfassung), TEIL B (Skript), TEIL C (Push-Bestätigung), TEIL D (offene Fragen).',

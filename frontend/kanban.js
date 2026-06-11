@@ -143,7 +143,7 @@ function renderCard(card) {
     <div class="kanban-card__footer">
       <div class="kanban-card__actions">
         <button class="kanban-card__action" data-action="edit" data-id="${card.id}" title="Bearbeiten">Bearbeiten</button>
-        <button class="kanban-card__action kanban-card__action--nix" data-action="nix-research" data-id="${card.id}" title="Vidi 🔭 Research starten">🔭 Nix</button>
+        ${['planned','research','script'].includes(card.status) ? `<button class="kanban-card__action kanban-card__action--nix" data-action="nix-research" data-id="${card.id}" title="Vidi 🔭 Research starten">🔭 Nix</button>` : ''}
         <button class="kanban-card__action" data-action="delete" data-id="${card.id}" title="Löschen">Löschen</button>
       </div>
     </div>
@@ -313,10 +313,19 @@ async function archiveCard(cardId) {
   }
 }
 
+// Set von Cards, für die gerade ein Research-Job läuft. Cooldown-Schutz gegen Doppel-Trigger.
+const _runningResearchJobs = new Set();
+
 async function triggerNixResearch(cardId) {
+  // 1) Client-side Cooldown: kein zweiter Trigger während der erste noch läuft
+  if (_runningResearchJobs.has(cardId)) {
+    showToast('🔭 Vidi läuft schon für diese Karte…', 3000);
+    return;
+  }
+  _runningResearchJobs.add(cardId);
   let toastId;
   try {
-    // 1) Job triggern (Vidi 🔭, ca. 30–50 vidIQ-Credits, 1–3 Min)
+    // 2) Job triggern (Vidi 🔭, ca. 30–50 vidIQ-Credits, 1–3 Min)
     const res = await fetch(`${API}/research/${cardId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -326,22 +335,26 @@ async function triggerNixResearch(cardId) {
     const { jobId } = await res.json();
     toastId = showToast(`🔭 Vidi forscht… (Job ${jobId.slice(0,8)}…)`, 0);
 
-    // 2) Polling alle 2s, max 5 Min
+    // 3) Polling alle 2s, max 5 Min
     const result = await pollResearchJob(jobId);
     if (toastId) hideToast();
 
-    // 3) Result anzeigen
+    // 4) Result anzeigen
     if (result.status === 'done') {
       const text = result.result?.text || '(kein Text)';
       showResearchResultModal(cardId, text, result);
       showToast('✅ Vidi fertig!', 3000);
     } else if (result.status === 'error') {
       showToast(`❌ Vidi-Fehler: ${result.error || 'unbekannt'}`, 8000);
+    } else if (result.status === 'cancelled') {
+      showToast('⏹️ Vidi-Job abgebrochen', 3000);
     }
   } catch (err) {
     if (toastId) hideToast();
     showToast('Fehler: ' + err.message, 5000);
     console.error('[triggerNixResearch]', err);
+  } finally {
+    _runningResearchJobs.delete(cardId);
   }
 }
 
@@ -382,11 +395,20 @@ function showResearchResultModal(cardId, text, job) {
     </div>
   `;
   document.body.appendChild(modal);
-  const close = () => modal.remove();
+  const close = () => {
+    modal.remove();
+    document.removeEventListener('keydown', onEsc);
+  };
+  const onEsc = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onEsc);
   modal.querySelector('.modal__close').onclick = close;
   modal.querySelector('[data-action="close"]').onclick = close;
   modal.querySelector('[data-action="open-card"]').onclick = () => { close(); openCardModal(cardId); };
   modal.querySelector('.modal__backdrop').onclick = close;
+  // Focus auf Close-Button (Accessibility + ESC-Fokus-Konvention)
+  setTimeout(() => {
+    if (modal.isConnected) modal.querySelector('.modal__close')?.focus();
+  }, 50);
 }
 
 function escapeHtml(s) {

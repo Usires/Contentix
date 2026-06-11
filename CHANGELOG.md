@@ -5,7 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] — 2026-06-11
+
+### Added
+- **🔭 1-Klick-Nix-Research im Kanban-Board**: 'Nix'-Action-Button auf jeder Card triggert Vidi 🔭 direkt aus dem Browser. End-to-End: Contentix → OpenClaw → Vidi → Skript-Push → Result-Modal.
+- **`research_jobs`-Tabelle**: Tracking für Vidi/Nix-Spawn-Jobs (job_id, video_id, agent_id, status, progress_message, result, error, started/finished_at) + Indices auf video_id und status.
+- **REST-Endpoints**:
+  - `POST /api/research/:videoId` — Spawn Vidi asynchron, Body `{ agent?, brief? }`, Response `{ jobId, status: 'pending' }`. **Cooldown**: 409 wenn Job schon läuft.
+  - `GET /api/research/:jobId` — Polling-Endpoint für Frontend (Status + Result + Job-Meta)
+  - `GET /api/research?videoId=&status=` — Job-Liste mit Filtern
+  - `DELETE /api/research/:jobId` — **Cancel** für laufende Jobs (Status → cancelled)
+- **🔭 Button im Card-Markup** (`kanban.js`): nur sichtbar auf sinnvollen Status (planned/research/script), Action-Handler in `triggerNixResearch()`.
+- **Client-Cooldown**: `_runningResearchJobs` Set verhindert Doppel-Trigger im Frontend.
+- **Polling-Pattern**: 2s-Intervall, 5-Min-Timeout, persistent Toast während Vidi läuft, Result-Modal mit Job-Meta und Report-Text.
+- **ESC-Handler im Modal**: Escape-Taste schließt das Result-Modal (wie andere App-Modals).
+- **Globaler JSON-Error-Handler**: kaputtes JSON-Body → sauberes 400 mit `{"error":"Invalid JSON body"}` statt HTML-Stacktrace.
+- **`showConfirm()` / `hideToast()` in utils.js**: Promise-basierte Confirm-Dialogs, Toast-API erweitert (durationMs=0 = persistent).
+- **Status-aware buildVidiBrief()**: generiert unterschiedliche Brief-Templates je nach video.status (planned=erste Recherche, research=weiter, script=V2, recording=Revision, done=PostPro, published=Follow-up).
+
+### Fixed
+- Doppel-Trigger-Schutz (Backend + Frontend): kein versehentliches 2x vidIQ-Credit-Verbrennen mehr.
+- Modal-Report rendert jetzt korrekt (App-Modal-Pattern mit Backdrop, Box, Schatten).
+- Cancel-Endpoint vorhanden — User muss nicht 5 Min auf Timeout warten.
+- DB-Indices auf research_jobs.video_id und status (Performance bei Skalierung).
+
+### Known Limitations
+- Progress-Anzeige zeigt nur statisches 'Spawning…' während Vidi läuft (kein Sub-Progress-Update von Vidi selbst).
+- Modal-Report ist text-only (kein Markdown-Rendering, keine Tabellen).
+- DELETE /api/research/:jobId markiert Job als cancelled, kann aber den laufenden OpenClaw-Spawn nicht direkt terminieren (kein PID-Tracking). Job bleibt bis zum Vidi-Final-Return sichtbar als 'cancelled'.
+
 ## [0.10.0-alpha] — 2026-06-11
+
+(Initial alpha, superseded by v0.10.0 same day with bugfixes.)
 
 ### Added
 - **🔭 1-Klick-Nix-Research im Kanban-Board**: 'Nix'-Action-Button auf jeder Card triggert Vidi 🔭 direkt aus dem Browser. End-to-End: Contentix → OpenClaw → Vidi → Skript-Push → Result-Modal.
