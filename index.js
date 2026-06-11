@@ -1079,39 +1079,141 @@ function buildVidiBrief(video) {
   return lines.join('\n');
 }
 
-// Asynchroner OpenClaw-Spawn. Aktualisiert research_jobs mit Status+Result.
+// Asynchroner OpenClaw-Spawn mit Sub-Progress-Tracking.
+// Updated research_jobs.progress_message in-place, während Vidi läuft.
 function runResearchJob(jobId, agentId, brief) {
   run('UPDATE research_jobs SET status = ?, progress_message = ? WHERE job_id = ?',
-      'running', `Spawning OpenClaw agent ${agentId}…`, jobId);
+      'running', '⏳ Starte Recherche…', jobId);
+  saveDB();
 
-  const { exec } = require('child_process');
+  const { spawn } = require('child_process');
   // Expliziter Pfad — systemd-Service-User 'dirk' hat openclaw nicht im PATH
   const OPENCLAW_BIN = '/home/dirk/.npm-global/bin/openclaw';
-  const cmd = `${OPENCLAW_BIN} agent --agent ${agentId} --message ${shellEscape(brief)} --json`;
   const cwd = '/home/dirk';
 
+  // --verbose on lässt OpenClaw Tool-Calls nach stderr loggen. Wir parsen die,
+  // um Phasen-Updates abzuleiten. Ohne Verbose fallen wir auf elapsed-time zurück.
+  const args = ['agent', '--agent', agentId, '--message', brief, '--json', '--verbose', 'on'];
   console.log(`[research] Job ${jobId}: spawning ${agentId} (${brief.length} chars)`);
-  console.log(`[research] cmd: ${OPENCLAW_BIN} agent --agent ${agentId} --message <…> --json`);
 
-  exec(cmd, { cwd, maxBuffer: 10 * 1024 * 1024, timeout: 15 * 60 * 1000 }, (err, stdout, stderr) => {
-    if (err) {
-      console.error(`[research] Job ${jobId} failed:`, err.message);
+  const proc = spawn(OPENCLAW_BIN, args, { cwd, env: process.env });
+  let stdout = '';
+  let stderr = '';
+  let lastProgressUpdate = Date.now();
+  const startTime = Date.now();
+  let currentPhase = 'Starte Recherche…';
+  const phases = []; // History für finalen Status
+
+  // Phasen-Mapping aus verbose-stderr-Output (Tool-Calls → User-Language-Phases)
+  // OpenClaw loggt typischerweise "→ tool: <name>" oder "calling <tool>".
+  const toolToPhase = {
+    'vidiq_keyword_research': '🔍 Recherche Keywords…',
+    'vidiq_outliers': '🔥 Suche Outlier-Videos…',
+    'vidiq_channel_videos': '📺 Lade Channel-Daten…',
+    'vidiq_video_comments': '💬 Analysiere Comments…',
+    'vidiq_channel_analytics': '📊 Channel-Analytics…',
+    'vidiq_score_title': '✍️ Bewerte Titel…',
+    'vidiq_generate_titles': '✍️ Generiere Titel-Varianten…',
+    'vidiq_generate_thumbnail': '🖼️ Generiere Thumbnail-Ideen…',
+    'web_search': '🌐 Web-Recherche…',
+    'memory_search': '🧠 Memory-Lookup…',
+    'memory_get': '🧠 Lade Memory…',
+    'read': '📖 Lese Datei…',
+    'write': '✏️ Schreibe Skript…',
+    'curl': '🌐 HTTP-Request…'
+  };
+
+  // Generisches Phase-Update mit elapsed-time fallback
+  function updateProgress(phase) {
+    if (phase === currentPhase) return;
+    if (phase && !phases.includes(phase)) phases.push(phase);
+    currentPhase = phase;
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    const phaseNote = phases.length > 0 ? ` · ${phases.length} Schritt${phases.length===1?'':'e'}` : '';
+    const msg = `${phase} (${elapsed}s${phaseNote})`;
+    run('UPDATE research_jobs SET progress_message = ? WHERE job_id = ?', [msg, jobId]);
+    saveDB();
+    lastProgressUpdate = Date.now();
+    console.log(`[research] Job ${jobId}: ${msg}`);
+  }
+
+  // Parse Tool-Calls aus stderr (verbose mode)
+  let stderrBuf = '';
+  proc.stderr.on('data', (chunk) => {
+    const text = chunk.toString();
+    stderr += text;
+    stderrBuf += text;
+    // Look for tool-call patterns: "→ tool:name", "calling tool:name", "tool: <name>"
+    const lines = stderrBuf.split('\n');
+    stderrBuf = lines.pop() || ''; // keep incomplete line
+    for (const line of lines) {
+      // Match patterns like "→ vidiq_keyword_research" or "calling vidiq_outliers"
+      const m = line.match(/(?:→|calling|tool[: ]+|->)\s*([a-z_][a-z0-9_]+)/i);
+      if (m) {
+        const tool = m[1].toLowerCase();
+        if (toolToPhase[tool]) {
+          updateProgress(toolToPhase[tool]);
+        }
+      }
+    }
+  });
+
+  // Elapsed-time fallback: alle 20s ein generisches Update, falls keine Tool-Events
+  const fallbackTimer = setInterval(() => {
+    if (Date.now() - lastProgressUpdate > 20000) {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      if (elapsed < 30) updateProgress('🔍 Recherche läuft…');
+      else if (elapsed < 90) updateProgress('📊 Daten werden analysiert…');
+      else if (elapsed < 180) updateProgress('✍️ Skript wird vorbereitet…');
+      else updateProgress('🔬 Aufwändige Recherche, gleich fertig…');
+    }
+  }, 20000);
+
+  proc.stdout.on('data', (chunk) => {
+    stdout += chunk.toString();
+  });
+
+  proc.on('close', (code, signal) => {
+    clearInterval(fallbackTimer);
+
+    if (signal === 'SIGTERM' || signal === 'SIGKILL') {
+      run('UPDATE research_jobs SET status=?, error=?, finished_at=datetime("now") WHERE job_id=?',
+          'cancelled', `Abgebrochen (${signal})`, jobId);
+      saveDB();
+      return;
+    }
+
+    if (code !== 0) {
+      console.error(`[research] Job ${jobId} failed: code=${code}, stderr=${stderr.slice(-500)}`);
       run('UPDATE research_jobs SET status = ?, error = ?, finished_at = datetime("now") WHERE job_id = ?',
-          'error', (err.message || 'unknown error').slice(0, 2000), jobId);
+          'error', (stderr || `exit code ${code}`).slice(0, 2000), jobId);
+      saveDB();
       return;
     }
     try {
       const parsed = JSON.parse(stdout);
       const summary = parsed.summary || parsed.status || 'completed';
       const text = parsed.result?.payloads?.[0]?.text || parsed.result?.text || '';
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      const finalMsg = `✅ Fertig in ${elapsed}s · ${phases.length} Schritte`;
       run('UPDATE research_jobs SET status = ?, progress_message = ?, result = ?, finished_at = datetime("now") WHERE job_id = ?',
-          'done', 'Completed', JSON.stringify({ summary, text, raw: parsed }), jobId);
-      console.log(`[research] Job ${jobId} completed (${summary})`);
+          'done', finalMsg, JSON.stringify({ summary, text, raw: parsed, phases, elapsedSec: elapsed }), jobId);
+      saveDB();
+      console.log(`[research] Job ${jobId} completed (${summary}, ${elapsed}s, ${phases.length} phases)`);
     } catch (parseErr) {
       console.error(`[research] Job ${jobId} parse error:`, parseErr.message);
       run('UPDATE research_jobs SET status = ?, error = ?, finished_at = datetime("now") WHERE job_id = ?',
           'error', 'Failed to parse OpenClaw output: ' + (parseErr.message || '').slice(0, 1000), jobId);
+      saveDB();
     }
+  });
+
+  proc.on('error', (err) => {
+    clearInterval(fallbackTimer);
+    console.error(`[research] Job ${jobId} spawn error:`, err.message);
+    run('UPDATE research_jobs SET status = ?, error = ?, finished_at = datetime("now") WHERE job_id = ?',
+        'error', (err.message || 'spawn failed').slice(0, 2000), jobId);
+    saveDB();
   });
 }
 

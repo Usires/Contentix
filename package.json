@@ -1,6 +1,6 @@
 {
   "name": "contentix",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "YouTube Content Planner with vidIQ Insights",
   "main": "index.js",
   "scripts": {

@@ -361,11 +361,21 @@ async function triggerNixResearch(cardId) {
 // Polling-Helper: ruft /api/research/:jobId alle 2s, gibt finalen Status zurück.
 async function pollResearchJob(jobId, { intervalMs = 2000, timeoutMs = 300000 } = {}) {
   const deadline = Date.now() + timeoutMs;
+  let lastProgress = '';
   while (Date.now() < deadline) {
     const res = await fetch(`${API}/research/${jobId}`);
     if (!res.ok) throw new Error(`Polling HTTP ${res.status}`);
     const job = await res.json();
-    if (job.status === 'done' || job.status === 'error') return job;
+    // Sub-Progress: Update-Tooltip + Toast wenn sich was ändert
+    if (job.progressMessage && job.progressMessage !== lastProgress) {
+      lastProgress = job.progressMessage;
+      // Toast updaten (nur Text), kein neues Popup
+      const toast = document.getElementById('kanbanToast');
+      if (toast && toast.classList.contains('kanban-toast--visible')) {
+        toast.textContent = `🔭 Vidi forscht… ${lastProgress}`;
+      }
+    }
+    if (job.status === 'done' || job.status === 'error' || job.status === 'cancelled') return job;
     await new Promise(r => setTimeout(r, intervalMs));
   }
   throw new Error('Vidi-Job Timeout (5 Min) — schau in /api/research/' + jobId);

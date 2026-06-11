@@ -192,3 +192,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - `.research-report`-CSS-Klasse (war für `<pre>`-Style, jetzt ersetzt durch `.markdown-body`).
 
+
+## [0.10.2] - 2026-06-11
+
+### Added
+- **Sub-Progress-Updates im Vidi-Research-Flow**: research_jobs.progress_message wird jetzt während des Vidi-Runs in-place aktualisiert. Frontend-Polling zeigt Live-Phase im Toast (z.B. "🔍 Recherche läuft… (40s · 2 Schritte)").
+- **Tool-Call-Pattern-Matching**: --verbose on parsed stderr nach Tool-Calls, mappt sie auf User-Language-Phasen (vidiq_keyword_research → "🔍 Recherche Keywords…", vidiq_outliers → "🔥 Suche Outlier-Videos…", write → "✏️ Schreibe Skript…", etc.).
+- **Elapsed-time-Fallback**: alle 20s ein generisches Update, falls keine Tool-Calls erkannt wurden. Garantiert dass das Frontend immer min. alle 20s ein Update sieht.
+- **Phasen-History im Result**: done-Jobs speichern `phases`-Array + `elapsedSec` im result-Feld für spätere Analyse.
+
+### Changed
+- runResearchJob: `exec` → `spawn` (stream statt buffer), dadurch stderr-Lesen in Echtzeit möglich.
+- runResearchJob: openclaw-Aufruf hat jetzt `--verbose on` damit Tool-Calls sichtbar werden.
+- Frontend triggerNixResearch → pollResearchJob: Toast-Text wird bei jedem Progress-Update aktualisiert, kein neues Popup.
+- runResearchJob: ruft jetzt `saveDB()` nach jeder Mutation auf (war Bug — Updates waren in-memory, nicht auf Disk, GET-Requests sahen veraltete Daten).
+
+### Fixed
+- Pre-Spawn-Cancel-Check: vor dem OpenClaw-Spawn wird geprüft ob der Job zwischenzeitlich gecancelt wurde, um unnötige Runs zu vermeiden.
+- Service-Crash beim ersten Cancel-Check: `run()` mit Callback gebrochen — durch `getAll()` ersetzt.
+
