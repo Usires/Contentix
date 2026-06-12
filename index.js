@@ -630,6 +630,107 @@ app.get('/api/vidiq/channel-stats', (req, res) => {
   }
 });
 
+// GET /api/vidiq/watchtime → estimated watch time (minutes → hours), cached 6h.
+// Costs 5 vidIQ credits on a cache miss; cache hit is free.
+// 28-day rolling window. Pairs with vidiq_channel_analytics.
+const CHANNEL_ID_FOR_WATCHTIME = 'UC-YmLEIgdESaoVN3ZKNT_QA';
+const WATCHTIME_CACHE_HOURS = 6;
+
+function getCachedWatchtime(channelId) {
+  // Stored as a sidecar key inside vidiq_cache.data under `_watchtime`.
+  // Returns { minutes, fetchedAt, source } or null.
+  const rows = getAll('SELECT data, fetched_at FROM vidiq_cache WHERE channel_id = ?', channelId);
+  if (rows.length === 0) return null;
+  try {
+    const data = JSON.parse(rows[0].data);
+    if (!data._watchtime) return null;
+    // Use savedAt (UTC ISO string) for the age calculation. `fetched_at` from
+    // SQLite is `datetime('now')` which is also UTC, but we double-check with
+    // savedAt to avoid TZ surprises in the future.
+    const savedAt = data._watchtime.savedAt || rows[0].fetched_at;
+    const ageH = (Date.now() - new Date(savedAt).getTime()) / 1000 / 60 / 60;
+    return {
+      minutes: data._watchtime.minutes,
+      avgViewPercentage: data._watchtime.avgViewPercentage,
+      fetchedAt: savedAt,
+      ageHours: ageH,
+      fresh: ageH < WATCHTIME_CACHE_HOURS,
+    };
+  } catch (e) { return null; }
+}
+
+function saveWatchtime(channelId, minutes, avgViewPercentage) {
+  // Merge into existing vidiq_cache.data so we don't lose the channel-stats blob.
+  const rows = getAll('SELECT data FROM vidiq_cache WHERE channel_id = ?', channelId);
+  const existing = rows.length > 0 ? JSON.parse(rows[0].data) : {};
+  existing._watchtime = { minutes, avgViewPercentage, savedAt: new Date().toISOString() };
+  if (rows.length > 0) {
+    run('UPDATE vidiq_cache SET data = ?, fetched_at = ? WHERE channel_id = ?',
+        JSON.stringify(existing), new Date().toISOString(), channelId);
+  } else {
+    run('INSERT INTO vidiq_cache (channel_id, data, fetched_at) VALUES (?, ?, ?)',
+        channelId, JSON.stringify(existing), new Date().toISOString());
+  }
+  saveDB();
+}
+
+async function fetchWatchtimeFromVidiq(channelId) {
+  // 28-day rolling window — matches the dashboard's default period.
+  const end = new Date();
+  const start = new Date(end.getTime() - 28 * 24 * 60 * 60 * 1000);
+  const fmt = d => d.toISOString().slice(0, 10);
+  const output = execSync(
+    vidIqCmd(99, 'vidiq_channel_analytics', {
+      channelId,
+      startDate: fmt(start),
+      endDate: fmt(end),
+      metrics: ['estimatedMinutesWatched', 'averageViewPercentage'],
+    }),
+    { encoding: 'utf8', timeout: 15000 }
+  );
+  const parsed = parseVidiqResponse(output);
+  // Response shape: { rows: [[minutes, avgViewPct], ...], columnHeaders: [...] }
+  const minutes = Number(parsed?.rows?.[0]?.[0] ?? 0);
+  const avgViewPercentage = Number(parsed?.rows?.[0]?.[1] ?? 0);
+  if (!Number.isFinite(minutes) || minutes < 0) {
+    throw new Error(`Unexpected vidiq_channel_analytics response: ${JSON.stringify(parsed).slice(0, 200)}`);
+  }
+  return { minutes, avgViewPercentage };
+}
+
+app.get('/api/vidiq/watchtime', async (req, res) => {
+  const channelId = CHANNEL_ID_FOR_WATCHTIME;
+  const cached = getCachedWatchtime(channelId);
+  if (cached && cached.fresh) {
+    res.json({
+      minutes: cached.minutes,
+      hours: Math.round(cached.minutes / 60),
+      avgViewPercentage: cached.avgViewPercentage,
+      windowDays: 28,
+      cached: true,
+      fetchedAt: cached.fetchedAt,
+      ageHours: Math.round(cached.ageHours * 10) / 10,
+    });
+    return;
+  }
+  try {
+    const { minutes, avgViewPercentage } = await fetchWatchtimeFromVidiq(channelId);
+    saveWatchtime(channelId, minutes, avgViewPercentage);
+    res.json({
+      minutes,
+      hours: Math.round(minutes / 60),
+      avgViewPercentage,
+      windowDays: 28,
+      cached: false,
+      fetchedAt: new Date().toISOString(),
+      ageHours: 0,
+    });
+  } catch (e) {
+    log.error('vidiq watchtime fetch error:', e.message);
+    res.status(500).json({ error: e.message, cached: false });
+  }
+});
+
 // GET /api/vidiq/video/:videoId → title + thumbnail_url (cached)
 app.get('/api/vidiq/video/:videoId', async (req, res) => {
   const { videoId } = req.params;
@@ -674,7 +775,7 @@ app.get('/api/vidiq/video/:videoId', async (req, res) => {
 
 // ─── vidIQ Background Refresh ─────────────────────────────────────────────────
 
-const TOTAL_REFRESH_STEPS = 5; // init + stats + balance + long + short (per-video is dynamic)
+const TOTAL_REFRESH_STEPS = 6; // init + stats + balance + long + short + watchtime
 
 async function runVidiqRefresh(jobId) {
   log.info('[vidIQ] runVidiqRefresh gestartet, jobId:', jobId);
@@ -705,6 +806,18 @@ async function runVidiqRefresh(jobId) {
     // Step 5: Short videos
     const shortOutput = execSync(vidIqCmd(5, 'vidiq_channel_videos', { channelId: CHANNEL_ID, videoFormat: 'short', popular: false }), { encoding: 'utf8', timeout: 15000 });
     updateProgress(5);
+
+    // Step 6: Watchtime (28-day rolling window, 5 vidIQ credits).
+    // Errors are non-fatal — we don't want a watchtime hiccup to fail the
+    // whole refresh; sidebar will just show "—" until the next attempt.
+    try {
+      const { minutes, avgViewPercentage } = await fetchWatchtimeFromVidiq(CHANNEL_ID);
+      saveWatchtime(CHANNEL_ID, minutes, avgViewPercentage);
+      log.info(`[vidIQ] Watchtime geladen: ${minutes} Min (${avgViewPercentage}% avg view)`);
+    } catch (wtErr) {
+      log.error('[vidIQ] Watchtime refresh fehlgeschlagen (nicht-fatal):', wtErr.message);
+    }
+    updateProgress(6);
 
     let stats = {};
     let balance = {};
@@ -754,8 +867,15 @@ async function runVidiqRefresh(jobId) {
       };
     }
 
-    const data = { stats, balance, channelId: CHANNEL_ID, latestVideo };
-    run('INSERT OR REPLACE INTO vidiq_cache (channel_id, data, fetched_at) VALUES (?, ?, datetime("now"))', CHANNEL_ID, JSON.stringify(data));
+    // Merge with any existing data so we don't clobber sidecar keys like
+    // `_watchtime` (written by Step 6 of the refresh).
+    const existingRows = getAll('SELECT data FROM vidiq_cache WHERE channel_id = ?', CHANNEL_ID);
+    const merged = existingRows.length > 0 ? JSON.parse(existingRows[0].data) : {};
+    merged.stats = stats;
+    merged.balance = balance;
+    merged.channelId = CHANNEL_ID;
+    merged.latestVideo = latestVideo;
+    run('INSERT OR REPLACE INTO vidiq_cache (channel_id, data, fetched_at) VALUES (?, ?, datetime("now"))', CHANNEL_ID, JSON.stringify(merged));
     saveDB();
 
     // Per-video cache: count total first, then process
@@ -786,7 +906,7 @@ async function runVidiqRefresh(jobId) {
     saveDB();
 
     // Done
-    run('UPDATE vidiq_refresh_jobs SET status = ?, finished_at = datetime("now"), result = ? WHERE job_id = ?', 'done', JSON.stringify({ ...data, videosImported }), jobId);
+    run('UPDATE vidiq_refresh_jobs SET status = ?, finished_at = datetime("now"), result = ? WHERE job_id = ?', 'done', JSON.stringify({ ...merged, videosImported }), jobId);
     saveDB();
 
   } catch (error) {

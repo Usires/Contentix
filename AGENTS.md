@@ -67,6 +67,7 @@ The vidIQ key is server-side only. Agents never see the key.
 | Refresh from vidIQ | POST | `/api/vidiq/refresh` |
 | Poll refresh status | GET | `/api/vidiq/refresh/status/:jobId` |
 | Get video stats | POST | `/api/vidiq/video-stats/:videoId` |
+| Get watchtime (28d) | GET | `/api/vidiq/watchtime` |
 
 ### Nix-research (v0.10+, optional)
 

@@ -171,6 +171,7 @@ See [AGENTS.md](./AGENTS.md) for the full reference. Highlights:
 | `GET` | `/api/history` | List archived videos |
 | `POST` | `/api/vidiq/refresh` | Trigger a vidIQ refresh (async, costs credits) |
 | `GET` | `/api/vidiq/stats` | Cached channel stats |
+| `GET` | `/api/vidiq/watchtime` | Cached watchtime (28-day window, 6h cache) |
 | `POST` | `/api/research/:videoId` | Trigger a Nix research run (v0.10+) |
 | `GET` | `/api/research/:jobId` | Poll a research job |
 | `DELETE` | `/api/research/:jobId` | Cancel a research job |

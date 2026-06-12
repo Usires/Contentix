@@ -208,6 +208,10 @@ async function refreshVidiq() {
             fetch('/api/vidiq/channel-stats').then(async (tr) => {
               if (tr.ok) updateSidebarStats(await tr.json());
             }).catch(() => {});
+            // Watchtime is now in vidiq_cache under _watchtime (saved as Step 6
+            // of the refresh). Pull it from its own endpoint so the sidebar
+            // shows the fresh value immediately.
+            loadWatchtime();
             btn.textContent = '⟳ vidIQ Refresh';
             btn.disabled = false;
             contentixReload();
@@ -423,8 +427,11 @@ async function loadStats() {
     // Ausrüstung (badges)
     document.getElementById('logbuchSubs').textContent = data.subs ? formatNumber(data.subs) : '—';
     document.getElementById('logbuchViews').textContent = data.views ? formatNumber(data.views) : '—';
-    document.getElementById('logbuchWatchtime').textContent = data.watchtimeHours ? `${formatNumber(data.watchtimeHours)} Std.` : '—';
     document.getElementById('logbuchVideos').textContent = data.videoCount ?? '—';
+
+    // Watchtime is loaded separately (cached 6h in vidiq_cache under _watchtime).
+    // Fire-and-forget: don't block the rest of the sidebar on a slow vidIQ call.
+    loadWatchtime();
 
     // Letzte Expedition widget removed — now in Bibliothek
   } catch (_) {
@@ -436,6 +443,26 @@ async function loadStats() {
 
   // Nächstes Video Widget
   updateNextVideo();
+}
+
+// Fetch the watchtime in the background. 5 vidIQ credits on a cache miss,
+// 0 on a hit. The sidebar shows a spinner until it lands.
+async function loadWatchtime() {
+  const el = document.getElementById('logbuchWatchtime');
+  if (!el) return;
+  const previous = el.textContent;
+  if (el.textContent === '—') el.textContent = '…';
+  try {
+    const r = await fetch(`${API}/vidiq/watchtime`);
+    if (!r.ok) throw new Error(`API ${r.status}`);
+    const w = await r.json();
+    el.textContent = w.hours ? `${formatNumber(w.hours)} Std.` : '—';
+    el.title = w.cached
+      ? `Cache: ${w.ageHours}h alt · ${w.windowDays}-Tage-Fenster · ${w.avgViewPercentage || '?'}% avg view`
+      : `Frisch geladen · ${w.windowDays}-Tage-Fenster · ${w.avgViewPercentage || '?'}% avg view`;
+  } catch (_) {
+    el.textContent = previous || '—';
+  }
 }
 
 // ─── Nächstes Video Widget ───────────────────────────────────────────────
@@ -534,7 +561,17 @@ async function loadChannelStats() {
     const data = await res.json();
     document.getElementById('stat-subs').textContent = formatNumber(data.subs);
     document.getElementById('stat-views').textContent = formatNumber(data.views);
-    document.getElementById('stat-watchtime').textContent = data.watchtimeHours ? formatNumber(data.watchtimeHours) + 'h' : 'N/A';
+    // Watchtime comes from the dedicated /api/vidiq/watchtime endpoint
+    // (cached 6h in vidiq_cache under _watchtime). Pulled in parallel.
+    fetch(`${API}/vidiq/watchtime`).then(async (wr) => {
+      if (!wr.ok) return;
+      const w = await wr.json();
+      const el = document.getElementById('stat-watchtime');
+      el.textContent = w.hours ? `${formatNumber(w.hours)}h` : 'N/A';
+      el.title = w.cached
+        ? `Cache: ${w.ageHours}h alt · 28-Tage-Fenster · ${w.avgViewPercentage || '?'}% avg view`
+        : `Frisch geladen · 28-Tage-Fenster · ${w.avgViewPercentage || '?'}% avg view`;
+    }).catch(() => {});
     if (data.latestVideo) {
       document.getElementById('latestVideoTitle').textContent = data.latestVideo.title || 'Unbekannt';
       document.getElementById('latestVideoLink').href = 'https://youtube.com/watch?v=' + data.latestVideo.videoId;

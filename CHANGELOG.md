@@ -18,6 +18,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.10.2] — 2026-06-11
 
 ### Added
+- **📊 Watchtime in the sidebar**: a new `/api/vidiq/watchtime` endpoint
+  pulls `estimatedMinutesWatched` (28-day rolling window) from
+  `vidiq_channel_analytics` and caches it for 6 h. The sidebar's
+  "⏱ Watch" badge and the channel-stats widget's "Std. Watchtime"
+  row now show real values instead of "0". Costs 5 vidIQ credits on
+  a cache miss, 0 on a hit.
+- **Watchtime as Step 6 of the vidIQ refresh**: the manual refresh
+  button now also pulls watchtime so the sidebar stays fresh after
+  a single click.
+
+### Fixed
+- `runVidiqRefresh` was clobbering the watchtime sidecar key when it
+  re-saved the channel-stats blob. The save now merges with existing
+  data so `_watchtime` (and any future sidecar keys) survive a
+  refresh.
 - **Sub-progress updates in the Vidi-research flow**: `research_jobs.progress_message`
   is updated in place while Vidi runs. Frontend polling shows the live phase
   in the toast (e.g. "🔍 Recherche läuft… (40s · 2 Schritte)").
