@@ -10,8 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Planned
 - v0.11: Markdown body inside research-result modal gets progress visualisation
   (per-phase timeline) — see `nix_comment` for the Vidi hand-off format.
-- v0.11: OpenClaw research polling surface — contentix polls a webhook on
-  progress instead of `tail -F` on stderr. Cleaner logs, no shell tricks.
+- v0.11: OpenClaw research progress via webhook — replace the current
+  `tail -F`-on-stderr hack (contentix spawns OpenClaw and parses the
+  sub-process's stderr in real time) with a proper webhook callback
+  from Vidi into contentix. Cleaner logs, no shell tricks, no race
+  between stderr-buffering and polling.
+  (The frontend polling of `GET /api/research/:jobId` shipped in
+  v0.10.0 — that's done. This is about the *progress-source*.)
 - v0.11: Cleanup pass on remaining `position`-field dead code (never written
   by any UI flow; candidate for removal before 0.11).
 
