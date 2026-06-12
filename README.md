@@ -1,344 +1,290 @@
-# Contentix — Der Kreativ-Kompass
+# Contentix — YouTube Content Planner
 
-*Für "The Dirk" YouTube-Kanal. gebaut mit Nix 🐧*
+*A self-hosted Kanban + Calendar + Script editor for solo YouTube creators, with vidIQ insights baked in.*
 
----
-
-## Überblick
-
-Contentix ist ein Video-Planungstool für YouTube-Kanäle. Es hilft bei:
-- **Ideen verwalten** (Kanban-Board mit 5 Spalten)
-- **Kalender** (Month/Week View mit geplanten Videos)
-- **Channel Stats** (vidIQ-Integration, "Das Logbuch" Design)
-- **Video-Pipeline** (Draft → Planned → Recording → Published)
-
-**Stack:** Node.js + Express + sql.js (Frontend + Backend in einer App, Port 3038)  
-**Frontend:** Vanilla JS + CSS (kein Framework), 4 View-Panels  
-**vidIQ:** MCP-basierte Integration für Channel-Stats und Video-Metadaten
+By Nix 🐧 & Dirk, 2026. Licensed under [MIT](./LICENSE).
 
 ---
 
-## Quick Start
+## What is it?
+
+Contentix is a single-binary web app for planning YouTube videos end to end:
+
+- 📋 **Kanban board** with a 5-stage status pipeline (ideas → research →
+  script → recording → uploaded) plus a separate `published` status for
+  videos that are actually live on YouTube.
+- 📅 **Calendar view** (Month + Week) with cards positioned by planned
+  and published dates.
+- ✏️ **Script editor** with markdown preview, link-to-video, archive
+  workflow, and a print-friendly view.
+- 📚 **Bibliothek** view listing all your videos and scripts with vidIQ
+  metadata.
+- 🔭 **1-click Nix-research** (v0.10+): a button on every Kanban card
+  triggers a Vidi research run via OpenClaw and streams the result
+  back into the UI.
+- 🎨 **Seasonal themes** (Nix Violet default + four others) with
+  per-theme colour tokens.
+
+**Stack:** Node.js + Express + sql.js (SQLite in-process) — frontend
+and backend in a single app. Port `3038`.
+
+**vidIQ:** MCP-based integration for channel and video stats. Each
+fresh call costs vidIQ credits, so the app caches aggressively in
+`vidiq_cache` and `vidiq_video_cache`.
+
+---
+
+## Quick Start (Docker)
 
 ```bash
-cd /home/dirk/contentix
-node index.js
-# → http://contentix.asbach-games.fritz.box (Port 3038)
+git clone https://github.com/Usires/contentix.git
+cd contentix
+cp .env.example .env
+# edit .env and add your VIDIQ_API_KEY
+docker-compose up -d
+open http://localhost:3038
 ```
+
+That's it. The database persists in `./data/`. Stop with
+`docker-compose down`, restart with `docker-compose restart`.
 
 ---
 
-## Architektur
+## Quick Start (Local Node)
 
-### Verzeichnisstruktur
+If you prefer running it directly (no Docker):
+
+```bash
+git clone https://github.com/Usires/contentix.git
+cd contentix
+cp .env.example .env
+# edit .env and add your VIDIQ_API_KEY
+npm install
+./start.sh       # → http://localhost:3038
+```
+
+`start.sh` is a thin wrapper around `restart.sh` — both are idempotent
+and use a PID file under `./contentix.pid`.
+
+---
+
+## Environment variables
+
+See [`.env.example`](./.env.example) for the full list. The only
+required one is `VIDIQ_API_KEY`. The OpenClaw variables are optional
+and only needed if you want the 🔭 research feature.
+
+| Variable | Required | Default | Notes |
+|----------|----------|---------|-------|
+| `VIDIQ_API_KEY` | yes | — | Get from [app.vidiq.com](https://app.vidiq.com) → Settings → API |
+| `PORT` | no | `3038` | HTTP port |
+| `DATA_DIR` | no | (next to `index.js`) | Where `contentix.db` lives. Docker sets this to `/app/data`. |
+| `LOG_LEVEL` | no | `info` | `info` \| `debug` \| `silent` |
+| `OPENCLAW_GATEWAY_URL` | no | — | e.g. `http://localhost:18789` |
+| `OPENCLAW_GATEWAY_TOKEN` | no | — | From `~/.openclaw/openclaw.json` |
+
+---
+
+## Architecture
 
 ```
 contentix/
-├── index.js              ← Backend (Express, API, vidIQ MCP calls)
-├── contentix.db         ← SQLite (sql.js), Videos + vidIQ Cache
-├── .env                 ← VIDIQ_API_KEY
-├── msfs-linux-update.js ← vidIQ MCP Server (nicht Contentix-Feature)
-└── frontend/
-    ├── index.html        ← HTML-Struktur (Sidebar + .main + View-Panels)
-    ├── app.js            ← Hauptrouter, loadStats, Navigation
-    ├── kanban.js         ← Kanban-Board (Drag&Drop, Card-CRUD)
-    ├── calendar.js       ← Kalender (Month/Week, Card-Placement)
-    ├── store.js          ← Zentraler State (Store-Pattern)
-    ├── utils.js          ← escapeHtml, formatNumber, truncate
-    ├── styles.css        ← Globales CSS
-    ├── kanban.css        ← Kanban-Board (5-Spalten Grid)
-    └── calendar.css       ← Kalender-Layout
+├── index.js              ← Backend: Express, REST API, vidIQ MCP client,
+│                            OpenClaw research bridge, sqlite-via-js
+├── Dockerfile            ← node:20-alpine, runs as non-root
+├── docker-compose.yml    ← Service definition, healthcheck, volumes
+├── package.json
+├── VERSION               ← Single source of truth (also read by /api/health)
+├── contentix.db          ← SQLite (created on first run, gitignored)
+├── data/                 ← Mount-point for Docker (contains contentix.db)
+├── frontend/
+│   ├── index.html        ← HTML structure (sidebar + .main + view-panels)
+│   ├── app.js            ← Main router, loadStats, navigation
+│   ├── kanban.js         ← Kanban board (drag&drop, card CRUD, 🔭 button)
+│   ├── calendar.js       ← Calendar (month + week, card placement)
+│   ├── store.js          ← Central state (pub/sub pattern)
+│   ├── utils.js          ← escapeHtml, formatNumber, truncate, toast
+│   ├── scripts.js        ← Script editor + markdown preview + print
+│   ├── history.js        ← History view (archived videos/scripts)
+│   ├── effects.js        ← Visual effects (Konami code, etc.)
+│   ├── styles.css        ← Global CSS + theme tokens
+│   ├── kanban.css        ← Kanban board (5-column grid)
+│   ├── calendar.css      ← Calendar layout
+│   └── history.css       ← History view
+├── restart.sh            ← Smart restart (PID file, port-aware, healthcheck)
+├── start.sh              ← Thin wrapper around restart.sh
+├── LICENSE
+├── README.md
+├── CHANGELOG.md
+├── MAKINGOF.md           ← How this project came to be
+├── SPEC.md               ← Original spec (now historical)
+├── AGENTS.md             ← AI agent integration guide
+├── UX-BRIEFING.md        ← Design notes
+└── HISTORY-SPEC.md       ← History feature spec (HIST v1.0)
 ```
 
 ### Routing
 
 `app.js` → `setupNav()`:
 
-| Sidebar-Nav | View | Inhalt |
-|-------------|------|--------|
-| `data-view="ideas"` | `#ideasView` | Kanban-Board (`#kanbanBoard`) |
-| `data-view="content"` | `#contentView` | Expeditionen + Channel Stats |
-| `data-view="calendar"` | `#calendarView` | Kalender |
-| `data-view="settings"` | `#settingsView` | Einstellungen |
+| Sidebar nav | View | Contents |
+|-------------|------|----------|
+| `data-view="ideas"` | `#ideasView` | Kanban board (`#kanbanBoard`) |
+| `data-view="content"` | `#contentView` | Expeditionen + channel stats |
+| `data-view="calendar"` | `#calendarView` | Calendar |
+| `data-view="settings"` | `#settingsView` | Settings (theme, etc.) |
 
-`#ideasView` enthält `<div id="kanbanBoard" class="board">` — das `class="board"` ist kritisch für das Grid-Layout.
+`#ideasView` contains `<div id="kanbanBoard" class="board">` — the
+`class="board"` is critical for the grid layout.
 
----
+### State management
 
-## State Management
+A single `store.js` module holds the canonical `allCards` array. Both
+`kanban.js` and `calendar.js` subscribe to the store — neither keeps
+its own copy. Updates are `setAllCards(newCards)` and the store
+notifies all listeners. This eliminates the race conditions you get
+when two views keep separate references.
 
-### Zentraler Store (`store.js`)
+### Logging
 
-```js
-getAllCards()      → gibt alle Karten zurück (lokale Kopie)
-setAllCards(cards)→ updated lokale Kopie + notify all listeners
-loadAllCards()    → fetch von /api/videos + setAllCards()
-```
-
-**Pattern:** pub/sub — alle Listener werden informiert wenn sich `allCards` ändert.  
-**Wichtig:** `calendar.js` und `kanban.js` nutzen NUR den Store. Keine eigenen `allCards`.
-
-### Veraltet: `window.allCards`
-
-Früher gab es ein globares `window.allCards`. Das verursachte Race Conditions weil calendar.js und kanban.js verschiedene Referenzen hatten. Jetzt über Store.
+`LOG_LEVEL` controls verbosity. Defaults to `info` (startup, lifecycle,
+errors). `debug` adds every API hit and every spawned sub-process.
+`silent` keeps only FATAL errors.
 
 ---
 
-## Kanban-Board
+## REST API
 
-### Spalten (5)
+See [AGENTS.md](./AGENTS.md) for the full reference. Highlights:
 
-| Spalten-ID | Label | DB-Status | Farbe |
-|------------|-------|-----------|-------|
-| `ideas` | 💡 Ideen | `planned` | `--lavender-mid` |
-| `research` | 🔬 Recherche | `research` | `--celtic-blue` |
-| `skript` | ✏️ Skript | `script` | `--nix-violet` |
-| `recording` | 🎬 Recording | `recording` | `--warning` |
-| `uploaded` | ✅ Hochgeladen | `done` | `--success` |
-
-**Wichtig:** `published` ist **keine Board-Spalte** — es ist der finale Status wenn ein Video tatsächlich bei YouTube gelandet ist (mit echter `video_id` und `published_date`). Diese Videos erscheinen nur im Kalender und in der Bibliothek, nicht im Board.
-
-### Status-Pipeline (komplett)
-
-Die DB speichert `status` als String. Es gibt 6 mögliche Werte:
-
-| DB-Status | Bedeutung | Wo sichtbar |
-|-----------|-----------|-------------|
-| `planned` | Idee / noch nicht angefangen | Board (Spalte `ideas`) |
-| `research` | Recherche läuft | Board (Spalte `research`) |
-| `script` | Skript wird geschrieben | Board (Spalte `skript`) |
-| `recording` | Video wird aufgenommen | Board (Spalte `recording`) |
-| `done` | Hochgeladen (YouTube-Upload fertig) | Board (Spalte `uploaded`) |
-| `published` | Live auf YouTube | Kalender + Bibliothek (KEIN Board) |
-
-Die `STATUS_MAP` in `frontend/kanban.js` macht die Spalten-↔-Status-Translation. Drag-and-Drop zwischen Spalten setzt automatisch den passenden `status` über `reverseStatusMap`.
-
-### Historisches
-
-- v0.1.0 hatte nur 3 Status-Werte: `planned | published | draft`
-- v0.9.0 erweiterte auf 5-Spalten-Pipeline: `planned | research | script | recording | done`
-- `published` wurde als Final-Status beibehalten, ist aber nicht mehr auf dem Board
-
-### CSS Grid
-
-```css
-.board {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(240px, 1fr));
-  gap: 16px;
-}
-```
-
-### Drag & Drop
-
-`kanban.js` → `handleDrop()`:
-- Zieht Karte von Spalte A nach B
-- PUT `/api/videos/:id` mit neuem `status`
-- `await loadCards()` → Store updated → alle Views sync
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/api/health` | Liveness + version |
+| `GET` | `/api/videos` | List all videos |
+| `POST` | `/api/videos` | Create a video |
+| `PUT` | `/api/videos/:id` | Update a video |
+| `DELETE` | `/api/videos/:id` | Delete a video |
+| `GET` | `/api/scripts` | List all scripts |
+| `POST` | `/api/scripts` | Create a script |
+| `POST` | `/api/scripts/import` | Import a `.md` file as a script |
+| `GET` | `/api/scripts/folders` | List script folders |
+| `GET` | `/api/history` | List archived videos |
+| `POST` | `/api/vidiq/refresh` | Trigger a vidIQ refresh (async, costs credits) |
+| `GET` | `/api/vidiq/stats` | Cached channel stats |
+| `POST` | `/api/research/:videoId` | Trigger a Nix research run (v0.10+) |
+| `GET` | `/api/research/:jobId` | Poll a research job |
+| `DELETE` | `/api/research/:jobId` | Cancel a research job |
 
 ---
 
-## vidIQ Integration
+## Database
 
-### Backend (`index.js`)
+Single SQLite file via `sql.js` (no native bindings, no compilation).
+On startup, `initDB()` either opens the existing `contentix.db` or
+creates a fresh schema. All migrations are idempotent — safe to run
+on every boot.
 
-**Endpoints:**
+### Tables (v0.10.2)
 
-| Endpoint | Methode | Beschreibung |
-|----------|---------|--------------|
-| `/api/vidiq/refresh` | POST | Ruft vidIQ MCP auf, cached alle Daten |
-| `/api/vidiq/channel-stats` | GET | Channel-Stats aus Cache (subs, views, watchtimeHours) |
-| `/api/vidiq/video/:videoId` | GET | Einzelnes Video aus vidIQ (cached) |
-| `/api/videos` | GET/POST | CRUD für Videos |
-| `/api/videos/:id` | PUT/DELETE | Video updaten/löschen |
-
-### vidIQ Datenstruktur
-
-```js
-// /api/vidiq/refresh response
-{
-  stats: {
-    currentStats: { subscribers: 395, views: 20765, videos: 17 },
-    // NICHT stats.subscribers → das ist undefined!
-    // Richtig: stats.currentStats.subscribers
-  },
-  latestVideo: { title, videoId, thumbnail, publishedAt },
-  balance: { remainingCredits: 0 }
-}
-```
-
-**Häufiger Fehler:** `data.stats.subscribers` → `undefined`.  
-**Richtige Pfad:** `data.stats.currentStats.subscribers`.
-
-### Credits-Sparen
-
-- `/api/vidiq/video/:videoId` cached Ergebnisse in `vidiq_video_cache` Tabelle
-- Wird nur abgerufen wenn `title` oder `thumbnail_url` leer sind
-- vidIQ hat nur 2000 Credits/Monat — jeder Call zählt
+- `videos` — the kanban cards. `status` is one of 6 values:
+  `planned | research | script | recording | done | published`.
+  See [AGENTS.md](./AGENTS.md#status-field-pipeline) for the full
+  pipeline semantics.
+- `scripts` — markdown script bodies, optionally linked to a video via
+  `video_id`.
+- `vidiq_cache`, `vidiq_video_cache` — vidIQ responses, keyed by
+  channel/video id. Saves credits.
+- `vidiq_refresh_jobs` — async vidIQ-refresh bookkeeping.
+- `research_jobs` — async Nix/Vidi research bookkeeping (v0.10+).
 
 ---
 
-## "Das Logbuch" — Channel Stats Design
+## vidIQ integration
 
-Sidebar-Panel mit warmem, personal Look:
+The backend calls vidIQ's MCP (Model Context Protocol) via HTTP(SSE).
+The MCP client lives in `index.js` (search for `makeVidiqCmd` and
+`parseVidiqResponse`). Responses are cached aggressively — a fresh
+video-stats call only happens when the cache is missing or stale.
 
-```
-┌─────────────────────────────┐
-│ Letzte Expedition            │
-│ [Thumb] Titel               │
-│ Datum · Auf YouTube →       │
-├─────────────────────────────┤
-│ 🚀 395  👁 20K  ⏱ 12K  📅17│
-└─────────────────────────────┘
-```
+**Credit-saving rules:**
 
-**CSS:** Playfair Display für Headlines, Inter für Body.
-
----
-
-## Kalender
-
-### Month View
-
-- 7-Spalten CSS Grid (Mo-So)
-- Cards werden nach `planned_date` oder `published_date` positioniert
-- Farbcodierung nach Status
-
-### Week View
-
-- `weekIndex` (0-4) für Wochen innerhalb eines Monats
-- Grid: 7 Spalten × 1 Row
-- Navigation: `prevCalendarPeriod()` / `nextCalendarPeriod()`
-
-### Card-Placement
-
-```js
-// calendar.js → cardDiff von firstDate der Woche berechnet
-const dayDiff = (plannedDate - firstDate) / (1000 * 60 * 60 * 24);
-// → korrekte Position im Week-Grid
-```
+- Channel stats: cached for 6 hours by default.
+- Video stats: cached forever per `video_id`, only re-fetched if
+  `title` or `thumbnail_url` are missing in the local row.
+- The `POST /api/vidiq/refresh` endpoint is the only way to force a
+  full refresh.
 
 ---
 
-## Das Diary-System
+## Nix-research integration (v0.10+)
 
-### `write-diary.py`
+The 🔭 button on every Kanban card calls
+`POST /api/research/:videoId`, which spawns a Vidi agent via
+[OpenClaw](https://github.com/openclaw/openclaw) and streams the
+result back. The frontend polls every 2 s and updates a persistent
+toast with live progress (e.g. "🔍 Recherche läuft… (40 s · 2
+Schritte)").
 
-Schreibt Einträge simultaneous in **zwei** Systeme:
+The result opens in a modal with full markdown rendering (via
+`marked.js` + `DOMPurify` for XSS safety). The Vidi run is also
+self-aware: it checks whether a script already exists for the video
+and skips a duplicate push.
 
-1. **Hugo** → `/var/www/thedirk.org/content/nix/diary-YYYY-MM-DD.md`
-2. **Qdrant** → `nix-memory` Collection (768d, type=diary)
-
-### Ollama Embeddings
-
-```python
-def generate_vector(text):
-    payload = {"model": "nomic-embed-text:latest", "prompt": text[:2000]}
-    req = urllib.request.Request("http://127.0.0.1:12434/api/embeddings", ...)
-    return json.load(resp)["embedding"]  # 768 Dimensionen
-```
-
-### Collection: `nix-memory`
-
-| Feld | Beschreibung |
-|------|-------------|
-| `type` | "diary", "memory", oder "hugo-migration" |
-| `title` | Titel des Eintrags |
-| `content` | Markdown-Inhalt |
-| `date` | YYYY-MM-DD |
-| `tags` | ["diary", "nix"] |
-| `source` | "hugo-migration" (bei importierten alten Einträgen) |
-
-### Qdrant CLI Commands
-
-```bash
-# Alle Punkte in nix-memory
-curl http://localhost:6333/collections/nix-memory | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['points_count'])"
-
-# Collection löschen + neu erstellen
-curl -X DELETE http://localhost:6333/collections/nix-diary
-curl -X PUT http://localhost:6333/collections/nix-diary -H "Content-Type: application/json" -d '{"vectors":{"size":768,"distance":"Cosine"}}'
-```
+For this to work, set `OPENCLAW_GATEWAY_URL` and
+`OPENCLAW_GATEWAY_TOKEN` in your `.env`. If you don't, the 🔭 button
+gracefully responds with a clear error message.
 
 ---
 
-## Häufige Probleme
+## For the maintainer (Dirk's local setup)
 
-### Kanban-Spalten untereinander statt nebeneinander
+When running on `asbach-games` directly (no Docker), the live process
+is started and supervised by `restart.sh`. A few notes that are not
+relevant for GitHub readers:
 
-**Ursache:** `<div id="kanbanBoard">` hat kein `class="board"`.  
-**Fix:** `<div id="kanbanBoard" class="board">`
-
-### Sidebar-Navs zeigen Views in falschem Bereich
-
-**Ursache:** View-Panels waren innerhalb `<aside>` statt in `<main>`.  
-**Fix:** Struktur in `index.html` korrigiert — `</aside>` vor allen Views, `<div class="main">` um View-Panels.
-
-### vidIQ Channel-Stats zeigen 0
-
-**Ursache:** Falscher Datenpfad — `data.stats.subscribers` ist `undefined`.  
-**Fix:** `data.stats.currentStats.subscribers` in `/api/vidiq/channel-stats` Handler.
-
-### Calendar zeigt "Cannot read properties of undefined (reading 'filter')"
-
-**Ursache:** `renderCalendarGrid(window.allCards)` — `window.allCards` war `undefined` weil Store noch nicht geladen.  
-**Fix:** `getAllCards()` aus Store verwenden statt global.
-
-### Doppelte State-Referenzen
-
-**Ursache:** `kanban.js` hatte eigenes `allCards = cards` PLUS `setAllCards(cards)`.  
-**Fix:** Nur noch `setAllCards(cards)` — Store notifyed alle Listener.
+- The manual start command is `./restart.sh`, not `node index.js`. The
+  script is idempotent and uses `./contentix.pid` to track the process.
+- Logs go to `./contentix.log` (gitignored) and stdout.
+- The host also runs NixBoard, OpenWebUI, n8n, Qdrant and other
+  services — Contentix is on port `3038` and is reverse-proxied at
+  `contentix.asbach-games.fritz.box`.
 
 ---
 
-## Cron Jobs
+## Troubleshooting
 
-### Heartbeat (alle 2 Stunden)
+### "EADDRINUSE" on startup
 
-```bash
-# Game Server Check
-pgrep -la 7DaysToDie | wc -l    # sollte 1 sein
-pgrep -la ucc-bin | wc -l         # sollte 1 sein
+Another process is holding port `3038`. Run `./restart.sh` (it kills
+the port-holder automatically) or `lsof -i :3038` / `ss -tlnp
+sport = :3038` to find it manually.
 
-# Docker Check
-docker ps --format "{{.Names}}: {{.Status}}" | grep -v "^Up"  # keine gestoppten
+### vidIQ stats show 0
 
-# Disk Check
-df -h /var/srv  # alert wenn >80%
-```
+Either your `VIDIQ_API_KEY` is wrong/expired, or you haven't triggered
+a refresh yet. Hit the "vidIQ refresh" button in the sidebar.
 
-### Diary Backup (täglich 09:00 Berlin)
+### `🔭 Nix-Research` button does nothing
 
-`memory-sync.py` — synct memory/*.md nach Qdrant `nix-memory`.
+Check that `OPENCLAW_GATEWAY_URL` and `OPENCLAW_GATEWAY_TOKEN` are set
+in `.env` and that your OpenClaw gateway is running and reachable.
 
-### Newsletter LILAC (Mo/Mi/Fr 08:00)
+### Kanban columns stack vertically
 
-`lilac.py` → `/home/dirk/.openclaw/workspace/scripts/lilac.py`
-
----
-
-## Nützliche Commands
-
-```bash
-# Contentix neustarten
-cd /home/dirk/contentix && node index.js &
-
-# vidIQ Refresh manuell
-curl -X POST http://localhost:3038/api/vidiq/refresh
-
-# Channel Stats check
-curl http://localhost:3038/api/vidiq/channel-stats | python3 -m json.tool
-
-# Qdrant Status
-curl http://localhost:6333/collections
-
-# Hugo Blog neubauen (für Diary)
-cd /var/www/thedirk.org && hugo
-
-# Backup Script
-bash /home/dirk/.openclaw/workspace/scripts/backup-workspace.sh
-```
+Make sure `<div id="kanbanBoard">` has `class="board"`. The class is
+required for the CSS grid.
 
 ---
 
-*By Nix 🐧 & Dirk, 2026. "Das ist unser Ding."*
+## Contributing
+
+This is a personal project shared publicly under MIT. Issues and PRs
+are welcome but expect a slow response — Dirk treats it as a learning
+lab, not a production codebase. See [AGENTS.md](./AGENTS.md) for the
+parts most relevant to AI agents.
+
+---
+
+*"Plan your content, Pinguin."* 🐧
+
+By Nix 🐧 & Dirk, 2026. *"Number 5 is alive."*

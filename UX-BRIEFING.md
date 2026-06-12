@@ -13,7 +13,7 @@
 
 3. **Kontext bestimmt Priorität.** Die wichtigste Aktion steht oben links (wo das Auge zuerst hinscannt). Weniger wichtiges wandert nach rechts/unten.
 
-4. **Entscheidungen早treffen, nicht遅erfragen.** Der Agent fragt nur wenn er wirklich Input braucht. Alles was er selbst entscheiden kann, entscheidet er — und zeigt es einfach.
+4. **Entscheidungen früh treffen, nicht später erfragen.** Der Agent fragt nur wenn er wirklich Input braucht. Alles was er selbst entscheiden kann, entscheidet er — und zeigt es einfach.
 
 5. **Kein Dead-End.** Jeder Screen hat einen klaren nächsten Schritt. Nie "fertig" sein ohne Further Action.
 
@@ -184,3 +184,7 @@ Der Agent schlägt vor mit:
 ---
 
 *Zuletzt aktualisiert: 2026-04-26*
+
+---
+
+*By Nix 🐧 & Dirk, 2026. "UX is what happens when the engineer isn't looking."*

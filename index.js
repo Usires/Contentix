@@ -7,13 +7,26 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const app = express();
 
+// ─── Logging ────────────────────────────────────────────────────────────────
+// LOG_LEVEL: 'info' (default) | 'debug' | 'silent'
+//   info  — startup, lifecycle events, errors
+//   debug — every API hit, every spawned sub-process
+//   silent — nothing except FATAL
+const LOG_LEVEL = (process.env.LOG_LEVEL || 'info').toLowerCase();
+const log = {
+  info:  (...a) => { if (LOG_LEVEL !== 'silent') console.log (...a); },
+  warn:  (...a) => { if (LOG_LEVEL !== 'silent') console.warn (...a); },
+  error: (...a) => { if (LOG_LEVEL !== 'silent') console.error(...a); },
+  debug: (...a) => { if (LOG_LEVEL === 'debug') console.log ('[debug]', ...a); },
+};
+
 // vidIQ API key check
 if (!process.env.VIDIQ_API_KEY) {
   console.error('FATAL: VIDIQ_API_KEY environment variable not set');
   process.exit(1);
 }
 const VIDIQ_API_KEY = process.env.VIDIQ_API_KEY;
-const PORT = 3038;
+const PORT = process.env.PORT || 3038;
 const API = `http://localhost:${PORT}/api`;
 
 app.use(express.json());
@@ -31,7 +44,15 @@ app.use(express.static(path.join(__dirname, 'frontend')));
 // ─── Database Setup ────────────────────────────────────────────────────────────
 
 let db;
-const DB_PATH = path.join(__dirname, 'contentix.db');
+// DB location:
+//   - If DATA_DIR is set, the .db lives in <DATA_DIR>/contentix.db (Docker).
+//   - Otherwise it lives next to index.js (local dev: simpler, zero config).
+const DB_PATH = process.env.DATA_DIR
+  ? path.join(process.env.DATA_DIR, 'contentix.db')
+  : path.join(__dirname, 'contentix.db');
+if (process.env.DATA_DIR) {
+  fs.mkdirSync(process.env.DATA_DIR, { recursive: true });
+}
 
 async function initDB() {
   const SQL = await initSqlJs();
@@ -64,7 +85,7 @@ async function initDB() {
     // Migrations: add new columns to existing DBs
     const videoCols = db.exec("PRAGMA table_info(videos)")[0]?.values.map(r => r[1]) || [];
     if (!videoCols.includes('owner')) {
-      try { db.run("ALTER TABLE videos ADD COLUMN owner TEXT DEFAULT 'dirk'"); console.log('Migration: added owner column to videos'); } catch(e) { console.error('Migration videos.owner failed:', e.message); }
+      try { db.run("ALTER TABLE videos ADD COLUMN owner TEXT DEFAULT 'dirk'"); log.info('Migration: added owner column to videos'); } catch(e) { log.error('Migration videos.owner failed:', e.message); }
     }
     db.run(`
       CREATE TABLE IF NOT EXISTS vidiq_cache (
@@ -656,7 +677,7 @@ app.get('/api/vidiq/video/:videoId', async (req, res) => {
 const TOTAL_REFRESH_STEPS = 5; // init + stats + balance + long + short (per-video is dynamic)
 
 async function runVidiqRefresh(jobId) {
-  console.log('[vidIQ] runVidiqRefresh gestartet, jobId:', jobId);
+  log.info('[vidIQ] runVidiqRefresh gestartet, jobId:', jobId);
   const CHANNEL_ID = 'UC-YmLEIgdESaoVN3ZKNT_QA';
 
   function updateProgress(step) {
@@ -778,7 +799,7 @@ async function runVidiqRefresh(jobId) {
 // ─── Routes: vidIQ ─────────────────────────────────────────────────────────────
 
 app.post('/api/vidiq/refresh', (req, res) => {
-  console.log('[vidIQ] Refresh gestartet');
+  log.info('[vidIQ] Refresh gestartet');
   const { randomUUID } = require('crypto');
   const jobId = randomUUID();
   const CHANNEL_ID = 'UC-YmLEIgdESaoVN3ZKNT_QA';
@@ -787,23 +808,23 @@ app.post('/api/vidiq/refresh', (req, res) => {
     // Create job record
     run('INSERT INTO vidiq_refresh_jobs (job_id, status, progress, total) VALUES (?, ?, 0, ?)', jobId, 'running', TOTAL_REFRESH_STEPS);
     saveDB();
-    console.log('[vidIQ] Job erstellt:', jobId);
+    log.info('[vidIQ] Job erstellt:', jobId);
 
     // Respond immediately
     res.json({ jobId, status: 'running', message: 'Refresh gestartet' });
-    console.log('[vidIQ] Response gesendet');
+    log.info('[vidIQ] Response gesendet');
 
     // Run in background (fire-and-forget)
-    setImmediate(() => { console.log('[vidIQ] Background Job startet'); runVidiqRefresh(jobId); });
+    setImmediate(() => { log.info('[vidIQ] Background Job startet'); runVidiqRefresh(jobId); });
   } catch(e) {
-    console.error('[vidIQ] POST handler error:', e.message);
+    log.error('[vidIQ] POST handler error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
 app.get('/api/vidiq/refresh/status/:jobId', (req, res) => {
   const { jobId } = req.params;
-  console.log('[vidIQ] Status poll:', jobId);
+  log.info('[vidIQ] Status poll:', jobId);
   const job = get('SELECT * FROM vidiq_refresh_jobs WHERE job_id = ?', jobId);
   if (!job) { res.status(404).json({ error: 'Job nicht gefunden' }); return; }
   res.json({
@@ -1094,7 +1115,7 @@ function runResearchJob(jobId, agentId, brief) {
   // --verbose on lässt OpenClaw Tool-Calls nach stderr loggen. Wir parsen die,
   // um Phasen-Updates abzuleiten. Ohne Verbose fallen wir auf elapsed-time zurück.
   const args = ['agent', '--agent', agentId, '--message', brief, '--json', '--verbose', 'on'];
-  console.log(`[research] Job ${jobId}: spawning ${agentId} (${brief.length} chars)`);
+  log.info(`[research] Job ${jobId}: spawning ${agentId} (${brief.length} chars)`);
 
   const proc = spawn(OPENCLAW_BIN, args, { cwd, env: process.env });
   let stdout = '';
@@ -1134,7 +1155,7 @@ function runResearchJob(jobId, agentId, brief) {
     run('UPDATE research_jobs SET progress_message = ? WHERE job_id = ?', [msg, jobId]);
     saveDB();
     lastProgressUpdate = Date.now();
-    console.log(`[research] Job ${jobId}: ${msg}`);
+    log.info(`[research] Job ${jobId}: ${msg}`);
   }
 
   // Parse Tool-Calls aus stderr (verbose mode)
@@ -1184,7 +1205,7 @@ function runResearchJob(jobId, agentId, brief) {
     }
 
     if (code !== 0) {
-      console.error(`[research] Job ${jobId} failed: code=${code}, stderr=${stderr.slice(-500)}`);
+      log.error(`[research] Job ${jobId} failed: code=${code}, stderr=${stderr.slice(-500)}`);
       run('UPDATE research_jobs SET status = ?, error = ?, finished_at = datetime("now") WHERE job_id = ?',
           'error', (stderr || `exit code ${code}`).slice(0, 2000), jobId);
       saveDB();
@@ -1199,9 +1220,9 @@ function runResearchJob(jobId, agentId, brief) {
       run('UPDATE research_jobs SET status = ?, progress_message = ?, result = ?, finished_at = datetime("now") WHERE job_id = ?',
           'done', finalMsg, JSON.stringify({ summary, text, raw: parsed, phases, elapsedSec: elapsed }), jobId);
       saveDB();
-      console.log(`[research] Job ${jobId} completed (${summary}, ${elapsed}s, ${phases.length} phases)`);
+      log.info(`[research] Job ${jobId} completed (${summary}, ${elapsed}s, ${phases.length} phases)`);
     } catch (parseErr) {
-      console.error(`[research] Job ${jobId} parse error:`, parseErr.message);
+      log.error(`[research] Job ${jobId} parse error:`, parseErr.message);
       run('UPDATE research_jobs SET status = ?, error = ?, finished_at = datetime("now") WHERE job_id = ?',
           'error', 'Failed to parse OpenClaw output: ' + (parseErr.message || '').slice(0, 1000), jobId);
       saveDB();
@@ -1210,7 +1231,7 @@ function runResearchJob(jobId, agentId, brief) {
 
   proc.on('error', (err) => {
     clearInterval(fallbackTimer);
-    console.error(`[research] Job ${jobId} spawn error:`, err.message);
+    log.error(`[research] Job ${jobId} spawn error:`, err.message);
     run('UPDATE research_jobs SET status = ?, error = ?, finished_at = datetime("now") WHERE job_id = ?',
         'error', (err.message || 'spawn failed').slice(0, 2000), jobId);
     saveDB();
@@ -1226,9 +1247,9 @@ function shellEscape(s) {
 
 initDB().then(() => {
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Contentix v${getVersion()} running on http://0.0.0.0:${PORT}`);
+    log.info(`Contentix v${getVersion()} running on http://0.0.0.0:${PORT}`);
   });
 }).catch(err => {
-  console.error('Failed to init DB:', err);
+  log.error('Failed to init DB:', err);
   process.exit(1);
 });

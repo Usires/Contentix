@@ -1,0 +1,31 @@
+# Dependencies — install fresh inside the image
+node_modules/
+
+# Local database — bind-mount at runtime, never bake into image
+contentix.db
+
+# Environment (contains vidIQ API key, OpenClaw gateway token)
+.env
+
+# Git history
+.git/
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Logs
+*.log
+npm-debug.log*
+
+# Prototype / exploration files (kept locally, not in repo)
+frontend/*-prototype.html

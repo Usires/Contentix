@@ -1,26 +1,46 @@
-version: '3.8'
+# Contentix — YouTube Content Planner with vidIQ Insights
+#
+# Quick start:
+#   1. cp .env.example .env  &&  edit .env (add VIDIQ_API_KEY)
+#   2. docker-compose up -d
+#   3. open http://localhost:3038
+#
+# Data is persisted on the host via the ./data volume — your `contentix.db`
+# lives in ./data/ and survives container restarts and image rebuilds.
+#
+# Reverse-proxy setup (nginx, Caddy, …) is up to you. The container listens
+# on 0.0.0.0:3038.
 
 services:
   contentix:
-    image: node:20-alpine
+    build: .
+    image: contentix:latest
     container_name: contentix-backend
     working_dir: /app
     volumes:
-      - ./contentix.db:/app/contentix.db
-      - ./index.js:/app/index.js
-      - ./database.js:/app/database.js
+      # Persistent database — bind-mount a host directory, never the .db file
+      # directly (avoids sqlite locking issues across restarts).
+      - ./data:/app/data
+      # Live-edit frontend/ without rebuilding the image (dev-friendly).
+      # Remove for a strictly immutable production deploy.
+      - ./frontend:/app/frontend
     ports:
       - "3038:3038"
     environment:
       - NODE_ENV=production
       - PORT=3038
-      - VIDIQ_API_KEY=vidIQ_3cWiT8DetUJwhAZLRrhu05dql4WeB57va5Pame6Z
+      - DATA_DIR=/app/data
+      # Secrets come from .env on the host. Never hardcode them here.
+      - VIDIQ_API_KEY=${VIDIQ_API_KEY}
+      - OPENCLAW_GATEWAY_URL=${OPENCLAW_GATEWAY_URL:-}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3038/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 20s
     networks:
       - internal
 

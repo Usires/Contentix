@@ -1,14 +1,32 @@
 # AI Agent Integration Guide
 
-This guide explains how AI assistants can interact with Contentix via its REST API.
+This guide explains how AI assistants can interact with Contentix via
+its REST API. Contentix is designed to be **agent-first**: every
+endpoint, every field, every status value is documented here so that
+an LLM can drive the app end-to-end without poking at the frontend.
 
-## Quick Reference
+---
 
-**App URL:** `http://localhost:3038` (or your deployed URL)  
-**API Base:** `http://localhost:3038/api/`  
-**vidIQ MCP:** `https://mcp.vidiq.com/mcp` (protocol v2024-11-05)
+## Quick reference
 
-## Available Endpoints
+**App URL:** `http://localhost:3038` (or your reverse-proxied host)  
+**API base:** `http://localhost:3038/api/`  
+**vidIQ MCP:** `https://mcp.vidiq.com/mcp` (protocol v2024-11-05)  
+**OpenClaw gateway:** `http://localhost:18789` (only if you use 🔭 Nix-research)
+
+---
+
+## Authentication
+
+Contentix is single-user and local-first. There is **no auth layer**:
+the app trusts whatever can reach port 3038. If you expose it via
+reverse proxy, put it behind a VPN or HTTP basic auth in nginx.
+
+The vidIQ key is server-side only. Agents never see the key.
+
+---
+
+## Available endpoints
 
 ### Videos
 
@@ -25,27 +43,49 @@ This guide explains how AI assistants can interact with Contentix via its REST A
 | Action | Method | Endpoint |
 |--------|--------|----------|
 | List all scripts | GET | `/api/scripts` |
+| Get single script | GET | `/api/scripts/:id` |
 | Create script | POST | `/api/scripts` |
 | Update script | PUT | `/api/scripts/:id` |
 | Delete script | DELETE | `/api/scripts/:id` |
 | Import .md file | POST | `/api/scripts/import` |
 | List folders | GET | `/api/scripts/folders` |
 
-### vidIQ Integration
+### History (soft archive)
+
+| Action | Method | Endpoint |
+|--------|--------|----------|
+| List archived videos | GET | `/api/history` |
+| Archive a video | POST | `/api/videos/:id/archive` |
+| Restore from archive | POST | `/api/videos/:id/restore` |
+| Restore a script | POST | `/api/scripts/:id/restore` |
+
+### vidIQ integration
 
 | Action | Method | Endpoint |
 |--------|--------|----------|
 | Get cached stats | GET | `/api/vidiq/stats` |
 | Refresh from vidIQ | POST | `/api/vidiq/refresh` |
+| Poll refresh status | GET | `/api/vidiq/refresh/status/:jobId` |
 | Get video stats | POST | `/api/vidiq/video-stats/:videoId` |
+
+### Nix-research (v0.10+, optional)
+
+| Action | Method | Endpoint |
+|--------|--------|----------|
+| Trigger research run | POST | `/api/research/:videoId` |
+| Poll research job | GET | `/api/research/:jobId` |
+| Cancel research job | DELETE | `/api/research/:jobId` |
+| List jobs | GET | `/api/research?videoId=&status=` |
 
 ### Health
 
 | Action | Method | Endpoint |
 |--------|--------|----------|
-| Health check | GET | `/api/health` |
+| Health check + version | GET | `/api/health` |
 
-## Video Object
+---
+
+## Video object
 
 ```json
 {
@@ -61,33 +101,48 @@ This guide explains how AI assistants can interact with Contentix via its REST A
   "tags": "linux,gaming",
   "notes": "Research notes...",
   "nix_comment": "AI-generated comment...",
-  "nix_comment_source": "manual|auto",
+  "nix_comment_source": "manual|vidiq|nix",
+  "owner": "dirk",
   "position": 1,
   "created_at": "2026-04-17T12:00:00Z",
   "updated_at": "2026-04-17T14:00:00Z"
 }
 ```
 
-### Status Field (Pipeline)
+### Status field (pipeline)
 
-The `status` field has **6 valid values**, representing the YouTube production pipeline:
+The `status` field has **6 valid values**, representing the YouTube
+production pipeline:
 
-| Status | Meaning | Kanban Column | Notes |
+| Status | Meaning | Kanban column | Notes |
 |--------|---------|---------------|-------|
-| `planned` | Idea / not started | `ideas` | Default for new videos |
-| `research` | Research phase | `research` | Gathering material |
-| `script` | Writing script | `skript` | Linked to `/api/scripts` record |
-| `recording` | Recording in progress | `recording` | |
-| `done` | Uploaded to YouTube (not yet public) | `uploaded` | May have `video_id` but not public |
-| `published` | Live on YouTube | (none) | Only in Calendar/Bibliothek, NOT on board |
+| `planned` | Idea / not started | `ideas` (💡) | Default for new videos |
+| `research` | Research phase | `research` (🔬) | Gathering material |
+| `script` | Writing script | `skript` (✏️) | Linked to `/api/scripts` record |
+| `recording` | Recording in progress | `recording` (🎬) | |
+| `done` | Uploaded to YouTube (not yet public) | `uploaded` (✅) | May have `video_id` but not public |
+| `published` | Live on YouTube | (no column) | Only in Calendar/Bibliothek |
+
+**Validation:** backend does not currently reject unknown status
+values. Frontend uses `STATUS_MAP` in `frontend/kanban.js` to translate
+between board columns and DB status values.
 
 **Migration history:**
-- v0.1.0: `planned | published | draft` (3 values)
-- v0.9.0: Extended to 6 values to support the 5-stage Kanban board pipeline
 
-**Validation:** Backend does not currently reject unknown status values. Frontend uses `STATUS_MAP` in `frontend/kanban.js` to translate between board columns and DB status values.
+- v0.1.0 (2026-04-17): `planned | published | draft` (3 values)
+- v0.9.0 (2026-05-29): 5 values + the `script` and `recording` stages
+- v0.9.3 (2026-06-03): `owner` column added; schema is now stable
 
-## Script Object
+### Owner field (v0.9.3+)
+
+`owner` is a free-form string identifying the human or agent who
+created the card. Default `'dirk'`. Future values may include `'nix'`
+or `'vidi'` to denote agent-created cards. The frontend renders an
+emoji avatar based on the value.
+
+---
+
+## Script object
 
 ```json
 {
@@ -106,62 +161,142 @@ The `status` field has **6 valid values**, representing the YouTube production p
 }
 ```
 
-## Usage Examples
+**Required field:** `slug` (URL-safe lowercase with hyphens). The
+backend does not auto-generate it; if you POST a script without a
+slug, you'll get a 500. Use a slugifier:
+
+```js
+function slugify(s) {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+```
+
+**`folder`** is one of: `scripts` (default), `channel`, `resources`,
+or any custom string. The frontend groups scripts by folder.
+
+---
+
+## Usage examples
 
 ### Create a video
-```javascript
-fetch('/api/videos', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    title: 'Linux Gaming Guide',
-    status: 'planned',
-    video_format: 'longform',
-    planned_date: '2026-04-20T14:00:00Z'
-  })
-});
+
+```bash
+curl -X POST http://localhost:3038/api/videos \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "title": "Linux Gaming Guide",
+    "status": "planned",
+    "video_format": "longform",
+    "planned_date": "2026-04-20T14:00:00Z"
+  }'
+```
+
+### Move a video to the script column
+
+```bash
+curl -X PUT http://localhost:3038/api/videos/<id> \
+  -H 'Content-Type: application/json' \
+  -d '{ "status": "script" }'
 ```
 
 ### Link a script to a video
-```javascript
-fetch('/api/scripts/40996f05-a4c6-4cf9-a119-fd295ec1dc57', {
-  method: 'PUT',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ video_id: 'dAOaX-5KHMw' })
-});
+
+```bash
+curl -X PUT http://localhost:3038/api/scripts/<script-id> \
+  -H 'Content-Type: application/json' \
+  -d '{ "video_id": "dAOaX-5KHMw" }'
+```
+
+### Trigger a Nix-research run (v0.10+)
+
+```bash
+curl -X POST http://localhost:3038/api/research/<video-id> \
+  -H 'Content-Type: application/json' \
+  -d '{ "agent": "youtubebot", "brief": "Custom research brief here" }'
+# → { "jobId": "...", "status": "pending" }
+```
+
+Poll for the result:
+
+```bash
+curl http://localhost:3038/api/research/<jobId>
+# → { "status": "done", "result": {...}, "elapsedSec": 217, ... }
 ```
 
 ### Refresh vidIQ data (costs API credits)
-```javascript
-fetch('/api/vidiq/refresh', { method: 'POST' });
+
+```bash
+curl -X POST http://localhost:3038/api/vidiq/refresh
+# → { "jobId": "..." }
+curl http://localhost:3038/api/vidiq/refresh/status/<jobId>
 ```
 
-## Environment Variables
+---
 
-- `VIDIQ_API_KEY` — Required for vidIQ MCP access
-- Port: default 3038
+## Environment variables (server-side)
 
-## MCP Integration (Advanced)
+- `VIDIQ_API_KEY` — required for vidIQ MCP access
+- `PORT` — default 3038
+- `DATA_DIR` — where `contentix.db` lives (default: next to `index.js`)
+- `LOG_LEVEL` — `info` | `debug` | `silent`
+- `OPENCLAW_GATEWAY_URL` — optional, for the v0.10 research feature
+- `OPENCLAW_GATEWAY_TOKEN` — optional, paired with the URL
 
-Contentix uses vidIQ's MCP protocol for YouTube channel data:
+---
 
-```javascript
+## MCP integration (advanced)
+
+Contentix itself uses vidIQ's MCP protocol for YouTube channel data:
+
+```js
 // Initialize MCP
-curl -X POST "https://mcp.vidiq.com/mcp" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}'
+const init = await fetch('https://mcp.vidiq.com/mcp', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer ***',
+    'Content-Type': 'application/json',
+    'Accept': 'application/json, text/event-stream',
+  },
+  body: JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'contentix', version: '1.0' } },
+  }),
+});
 
-// Get channel stats
-curl -X POST "https://mcp.vidiq.com/mcp" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"vidiq_channel_stats","arguments":{"channelId":"YOUR_CHANNEL_ID"}}}'
+// Call a tool
+const stats = await fetch('https://mcp.vidiq.com/mcp', {
+  method: 'POST',
+  headers: { /* same */ },
+  body: JSON.stringify({
+    jsonrpc: '2.0',
+    id: 2,
+    method: 'tools/call',
+    params: { name: 'vidiq_channel_stats', arguments: { channelId: 'YOUR_CHANNEL_ID' } },
+  }),
+});
 ```
 
-## Agent Notes
+The full client lives in `index.js` (search for `makeVidiqCmd` and
+`parseVidiqResponse`).
 
-- All timestamps are ISO 8601 format
-- Tags are stored as comma-separated strings (videos) or JSON arrays (scripts)
-- Video IDs are YouTube video IDs (11 characters)
-- vidIQ refresh is rate-limited — check `/api/vidiq/stats` cached data before triggering a fresh fetch
+---
+
+## Agent notes
+
+- All timestamps are ISO 8601 format.
+- Tags are stored as **comma-separated strings** for videos, and
+  **JSON arrays** for scripts. Convert when crossing the boundary.
+- Video IDs are YouTube video IDs (11 characters).
+- vidIQ refresh is rate-limited — check `/api/vidiq/stats` cached
+  data before triggering a fresh fetch.
+- The 🔭 research endpoint (v0.10+) is async and returns a `jobId`
+  immediately. Always poll `GET /api/research/:jobId` rather than
+  blocking.
+- Research jobs are 1-per-video at a time: a second `POST` while
+  one is running returns HTTP 409.
+
+---
+
+*By Nix 🐧 & Dirk, 2026. "Be resourceful, not performative."*

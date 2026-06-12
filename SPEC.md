@@ -1,164 +1,234 @@
-# Contentix — SPEC.md
+# Contentix — Specification
 
-*YouTube Content Planner — By Nix & Dirk — 2026-04-16*
+*YouTube Content Planner — By Nix & Dirk — last revised 2026-06-12*
+
+> **Note:** this is the **current** specification. The original Phase-1
+> spec (5.1–5.6 below) is preserved as historical context. The actual
+> system has grown well beyond it — see [MAKINGOF.md](./MAKINGOF.md)
+> for the story of how we got here and [README.md](./README.md) for
+> the live architecture.
 
 ---
 
 ## 1. Overview
 
 **Name:** Contentix (Content + Nix)  
-**Purpose:** Calendar-based YouTube content planner with vidIQ insights  
-**Phase 1:** MVP — Calendar View + Video Cards + Manual Entry + vidIQ Dashboard (on-request)
+**Purpose:** Self-hosted Kanban + Calendar + Script editor for solo
+YouTube creators, with vidIQ insights and (optionally) Nix/Vidi
+AI-research integration.  
+**Version at time of writing:** 0.10.2
 
 ---
 
-## 2. Tech Stack
+## 2. Tech stack
 
 | Layer | Technology |
 |-------|------------|
-| Backend | Node.js + Express + SQLite |
-| Frontend | Vanilla JS + CSS |
-| Database | SQLite (`contentix.db`) |
-| Port | 3038 (backend) → reverse proxy |
-| vidIQ | MCP HTTP(SSE) — on-request only |
+| Backend | Node.js + Express + sql.js (SQLite in-process) |
+| Frontend | Vanilla JS + CSS (no framework, no build step) |
+| Database | SQLite (`contentix.db`, single file) |
+| Default port | `3038` (configurable via `PORT`) |
+| Reverse proxy | any (we use nginx in production) |
+| vidIQ | MCP HTTP(SSE) — on-request, cached aggressively |
+| OpenClaw | optional — for the v0.10+ Nix-research feature |
+| Container | `node:20-alpine`, multi-stage not needed |
 
 ---
 
-## 3. Database Schema
+## 3. Database schema (v0.10.2)
 
-### videos
+### `videos`
+
 ```sql
 CREATE TABLE videos (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  status TEXT DEFAULT 'planned',  -- 'planned' | 'research' | 'script' | 'recording' | 'done' | 'published'
-                                -- planned   = idea, not started
-                                -- research  = gathering material
-                                -- script    = writing script
-                                -- recording = recording in progress
-                                -- done      = uploaded to YouTube
-                                -- published = live on YouTube (calendar/bibliothek only)
-  planned_date TEXT,
-  published_date TEXT,
-  video_id TEXT,                   -- YouTube video ID
+  id          TEXT PRIMARY KEY,
+  title       TEXT NOT NULL,
+  status      TEXT DEFAULT 'planned',
+  planned_date    TEXT,
+  published_date  TEXT,
+  video_id    TEXT,                    -- YouTube video ID (11 chars)
   youtube_url TEXT,
-  tags TEXT,                        -- JSON array
-  notes TEXT,
-  nix_comment TEXT,
-  nix_comment_source TEXT,          -- 'manual' | 'vidiq' | 'nix'
-  position INTEGER DEFAULT 0,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  tags        TEXT,                    -- comma-separated string
+  notes       TEXT,
+  nix_comment TEXT,                    -- last AI/agent comment
+  nix_comment_source TEXT DEFAULT 'manual',  -- 'manual' | 'vidiq' | 'nix'
+  owner       TEXT DEFAULT 'dirk',     -- 'dirk' | 'nix' | 'vidi' (multi-agent ready)
+  position    INTEGER DEFAULT 0,
+  created_at  TEXT DEFAULT (datetime('now')),
+  updated_at  TEXT DEFAULT (datetime('now'))
 );
 ```
 
-### vidiq_cache
+### `scripts`
+
 ```sql
-CREATE TABLE vidiq_cache (
-  channel_id TEXT PRIMARY KEY,
-  data TEXT,                        -- JSON
-  fetched_at TEXT
+CREATE TABLE scripts (
+  id           TEXT PRIMARY KEY,
+  title        TEXT NOT NULL,
+  slug         TEXT NOT NULL,
+  folder       TEXT DEFAULT 'scripts',
+  status       TEXT DEFAULT 'draft',   -- 'draft' | 'in-review' | 'final'
+  content      TEXT DEFAULT '',
+  video_id     TEXT,                    -- optional FK to videos.video_id
+  video_format TEXT DEFAULT 'longform',
+  tags         TEXT DEFAULT '[]',
+  position     INTEGER DEFAULT 0,
+  created_at   TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at   TEXT DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
----
+### `vidiq_cache` / `vidiq_video_cache`
 
-## 4. API Endpoints
+Per-channel / per-video JSON caches. Saves credits.
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/health` | Health check |
-| GET | `/api/videos` | List all videos |
-| POST | `/api/videos` | Create video |
-| GET | `/api/videos/:id` | Get video |
-| PATCH | `/api/videos/:id` | Update video |
-| DELETE | `/api/videos/:id` | Delete video |
-| GET | `/api/videos/calendar/:year/:month` | Videos for month |
-| GET | `/api/vidiq/stats` | Channel stats (cached) |
-| POST | `/api/vidiq/refresh` | Refresh vidIQ data |
-| POST | `/api/vidiq/video-stats/:videoId` | Get video stats |
+### `vidiq_refresh_jobs`
+
+Async bookkeeping for `POST /api/vidiq/refresh`.
+
+### `research_jobs` (v0.10+)
+
+Async bookkeeping for `POST /api/research/:videoId` (Vidi runs).
 
 ---
 
-## 5. Design
+## 4. Status pipeline
 
-### Colors
-- Background: `#0d1117`
-- Card bg: `#161b22`
-- Border: `#30363d`
-- Text: `#e6edf3`
-- Muted: `#8b949e`
-- Accent planned: `#f0b429` (yellow)
-- Accent published: `#238636` (green)
-- Accent draft: `#1f6feb` (blue)
-- Nix accent: `#79c0ff` (light blue)
+`videos.status` has **6 valid values**. The first 5 map to Kanban
+columns; the 6th is the post-board final state.
 
-### Typography
-- Primary: `JetBrains Mono` (monospace, nerd aesthetic)
-- Fallback: `Fira Code`, `monospace`
+| Status | Meaning | Kanban column | Visible elsewhere |
+|--------|---------|---------------|-------------------|
+| `planned` | Idea, not started | `ideas` (💡) | — |
+| `research` | Research in progress | `research` (🔬) | — |
+| `script` | Script being written | `skript` (✏️) | — |
+| `recording` | Recording in progress | `recording` (🎬) | — |
+| `done` | Uploaded to YouTube (not public yet) | `uploaded` (✅) | — |
+| `published` | Live on YouTube | (no column) | Calendar, Bibliothek |
 
-### Layout
-- Full-viewport calendar grid
-- Header: Month/Year navigation + Week/Month toggle
-- Calendar: 7-column grid, each day a cell
-- Sidebar (desktop): Nix Dashboard + Stats
-- Mobile: Stack vertically
+**Migration history:**
 
-### Easter Eggs
-- Small ASCII Nix penguin in footer (`🐧`)
-- Konami code reveals secret Nix quote
-- Subtle CRT scanline overlay (very light, 2% opacity)
+- v0.1.0 (2026-04-17): 3 values: `planned | published | draft`
+- v0.9.0 (2026-05-29): 5 values, Kanban gets a 5-stage pipeline
+- v0.9.3 (2026-06-03): `owner` column added; the schema is now
+  considered final
+
+**Validation:** the backend does not currently reject unknown status
+values. Frontend uses `STATUS_MAP` in `frontend/kanban.js` to translate
+between board columns and DB status values.
 
 ---
 
-## 6. Features — Phase 1
+## 5. Historical: original Phase-1 spec (2026-04-16)
 
-### Calendar View
-- [x] Month view (default): 6-week grid, days with videos show dots
-- [x] Week view: 7 columns, larger cards
-- [x] Navigate months/weeks with ◀ ▶
-- [x] Today indicator (border highlight)
-- [x] Click day to see/add videos
+The MVP that Contentix started as. Kept here for context — the
+shipped product has grown well past it.
 
-### Video Cards
-- [x] Show video title, status badge
-- [x] Click to expand/edit
-- [x] Drag to reschedule (future)
-- [x] Color-coded by status
+### 5.1 Goals (Phase 1)
 
-### Nix Dashboard (Sidebar)
-- [x] Current month at a glance
-- [x] Next planned video
-- [x] vidIQ stats button (on-request)
-- [x] Nix comment placeholder
+- Calendar view (Month + Week) for content planning
+- Video cards with status, dates, tags, notes
+- vidIQ channel stats on request
+- Nix AI-comment placeholder
 
-### vidIQ Integration (on-request)
-- [x] Button: "vidIQ refresh" — fetches fresh data
-- [x] Shows channel stats (subs, views, growth)
-- [x] Shows credits remaining
-- [x] Manual refresh only (no auto-poll)
+### 5.2 Tech (Phase 1)
+
+- Node.js + Express + sql.js
+- Vanilla JS + CSS frontend
+- Port 3038
+
+### 5.3 Database (Phase 1)
+
+`videos` table only (4 columns: `id`, `title`, `status`,
+`published_date`). No `tags`, no `notes`, no `nix_comment`, no scripts
+table, no vidIQ cache.
+
+### 5.4 Endpoints (Phase 1)
+
+5 routes: `GET/POST /api/videos`, `GET /api/vidiq/stats`,
+`POST /api/vidiq/refresh`, `GET /api/health`. No scripts, no research,
+no history.
+
+### 5.5 Design (Phase 1)
+
+- Dark theme only (no seasonal variants)
+- JetBrains Mono everywhere
+- Sidebar with "Nix Dashboard" + stat badges
+- Konami code Easter egg
+
+### 5.6 Easter eggs (Phase 1)
+
+- ASCII Nix penguin in footer (`🐧`)
+- Konami code reveals a secret Nix quote
+- Subtle CRT scanline overlay (2% opacity)
+
+### 5.7 What changed between Phase 1 and now
+
+See [MAKINGOF.md](./MAKINGOF.md) for the full story. TL;DR:
+
+- The Phase-1 calendar was replaced by a Kanban-first design (Dirk's
+  editorial workflow lives in the columns, not in dates).
+- 5 seasonal themes replaced the single dark theme.
+- The script editor was added (markdown + link to video + print view).
+- The history view was added (soft archive instead of hard DELETE).
+- The Nix-research bridge (v0.10) was added — Contentix can now
+  trigger a Vidi AI-research run and stream the result back.
 
 ---
 
-## 7. Status Codes
+## 6. API endpoint reference
 
-| Status | Color | Meaning |
-|--------|-------|---------|
-| `planned` | 🟡 yellow | Scheduled, not published |
-| `published` | 🟢 green | Live on YouTube |
-| `draft` | 🔵 blue | Idea, not scheduled |
+The full table is in [AGENTS.md](./AGENTS.md). Highlights:
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/health` | GET | Liveness + version |
+| `/api/videos` | GET/POST | List/create videos |
+| `/api/videos/:id` | GET/PUT/DELETE | Read/update/delete one video |
+| `/api/scripts` | GET/POST | List/create scripts |
+| `/api/scripts/folders` | GET | List script folders (static, before `:id` route) |
+| `/api/scripts/:id` | GET/PUT/DELETE | Read/update/delete one script |
+| `/api/scripts/import` | POST | Import a `.md` file as a script |
+| `/api/history` | GET | List archived videos |
+| `/api/vidiq/refresh` | POST | Async refresh (returns `jobId` immediately) |
+| `/api/vidiq/refresh/status/:jobId` | GET | Poll a vidIQ refresh |
+| `/api/vidiq/stats` | GET | Cached channel stats |
+| `/api/research/:videoId` | POST | Trigger a Nix/Vidi research run (v0.10+) |
+| `/api/research/:jobId` | GET | Poll a research job |
+| `/api/research/:jobId` | DELETE | Cancel a research job |
+| `/api/research?videoId=&status=` | GET | List research jobs |
 
 ---
 
-## 8. NixBoard Comparison
+## 7. Design tokens
 
-| | NixBoard | Contentix |
-|--|---------|-----------|
-| View | Kanban | Calendar |
-| Port | 3036 | 3038 |
-| Focus | Tasks | YouTube Content |
-| vidIQ | No | Yes (on-request) |
+The frontend uses CSS custom properties for theme-awareness. The
+canonical list lives in `frontend/styles.css`. Key tokens:
+
+- `--nix-violet`, `--nix-violet-light`, `--nix-violet-dark`
+- `--bg-primary`, `--bg-secondary`, `--bg-tertiary`
+- `--text-primary`, `--text-secondary`
+- `--text-on-dark`, `--text-on-dark-secondary`
+- `--warning`, `--success`, `--cal-header-fg`, `--bg-cal-header`
+
+Each theme (Nix Violet default, Frühling, Sommer, Herbst, Winter)
+redefines these tokens.
 
 ---
 
-*Let's plan some content. — Nix 🐧*
+## 8. Non-goals (still)
+
+Things Contentix explicitly does **not** do:
+
+- ❌ Multi-user collaboration (single-user, local-first)
+- ❌ Direct YouTube upload (videos are linked, not pushed)
+- ❌ Analytics dashboards (vidIQ gives the raw numbers, we don't
+  re-charthem)
+- ❌ Cloud sync (the SQLite file is your data; back it up however you
+  want)
+- ❌ Mobile app (the responsive web UI works on tablets, but not on
+  phones)
+
+---
+
+*By Nix 🐧 & Dirk, 2026. We build our own story.*

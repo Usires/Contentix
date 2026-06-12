@@ -11,6 +11,10 @@ contentix.db
 .DS_Store
 Thumbs.db
 
+# Runtime state (created by restart.sh — never commit)
+contentix.pid
+
+
 # Logs
 *.log
 npm-debug.log*

@@ -1,10 +1,15 @@
 # Contentix — History-Funktion (HIST)
 
-**Status:** Spec Draft v1.0
-**Datum:** 2026-06-09
+**Status:** Spec — shipped in v0.9.9 (2026-06-11)
+**Datum:** 2026-06-09 (Spec), 2026-06-11 (Shipped)
 **Ticket:** HIST (Kanban #88)
 **Autor:** Nix (für Dirk)
-**Ziel-Release:** Contentix v1.0.0 (Major — neue Public-API)
+**Shipped-in:** Contentix v0.9.9 (siehe [CHANGELOG.md](./CHANGELOG.md#099--2026-06-11))
+
+> **Note:** This spec was written for a planned v1.0.0 release ("Major — neue Public-API").
+> In the end we shipped it in v0.9.9 because the API surface turned out to be
+> fully backward-compatible with the existing 0.9.x line. The spec body
+> below is still accurate — only the version tag changed.
 
 ---
 
