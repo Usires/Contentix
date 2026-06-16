@@ -12,7 +12,7 @@ an LLM can drive the app end-to-end without poking at the frontend.
 **App URL:** `http://localhost:3038` (or your reverse-proxied host)  
 **API base:** `http://localhost:3038/api/`  
 **vidIQ MCP:** `https://mcp.vidiq.com/mcp` (protocol v2024-11-05)  
-**OpenClaw gateway:** `http://localhost:18789` (only if you use 🔭 Nix-research)
+**OpenClaw gateway:** `http://localhost:18789` (only if you use 🔭 Vidi-research)
 
 ---
 
@@ -69,7 +69,12 @@ The vidIQ key is server-side only. Agents never see the key.
 | Get video stats | POST | `/api/vidiq/video-stats/:videoId` |
 | Get watchtime (28d) | GET | `/api/vidiq/watchtime` |
 
-### Nix-research (v0.10+, optional)
+### Vidi research (v0.10+, optional)
+
+The 🔭 button on every Kanban card spawns the **Vidi** subagent
+(OpenClaw agent `youtubebot`) which collects vidIQ data and writes
+the result back into the card. Vidi is a scout, not a coach — see
+`docs/vidi-agent.md` for the architecture and role split.
 
 | Action | Method | Endpoint |
 |--------|--------|----------|
@@ -208,7 +213,7 @@ curl -X PUT http://localhost:3038/api/scripts/<script-id> \
   -d '{ "video_id": "dAOaX-5KHMw" }'
 ```
 
-### Trigger a Nix-research run (v0.10+)
+### Trigger a Vidi-research run (v0.10+)
 
 ```bash
 curl -X POST http://localhost:3038/api/research/<video-id> \

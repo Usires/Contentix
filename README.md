@@ -22,9 +22,12 @@ Contentix is a single-binary web app for planning YouTube videos end to end:
   thumbnails, auto-generated hooks (stats / performance / Nix-comment)
   per slot, and a 🌶️ Hooks toggle (Alle / Stats / Aus) for personal
   taste. See `docs/bibliothek-redesign.md` for the design spec.
-- 🔭 **1-click Nix-research** (v0.10+): a button on every Kanban card
-  triggers a Vidi research run via OpenClaw and streams the result
-  back into the UI.
+- 🔭 **Vidi agent** (1-click YouTube research, v0.10+): a button on every
+  Kanban card spawns a Vidi research run via OpenClaw, streams
+  progress into the UI, and writes the final report into the card.
+  Vidi is a separate agent in the same OpenClaw gateway — a scout
+  that gathers vidIQ data, not a coach. See `docs/vidi-agent.md` for
+  the architecture.
 - 🎨 **Seasonal themes** (Nix Violet default + four others) with
   per-theme colour tokens.
 
@@ -220,10 +223,10 @@ video-stats call only happens when the cache is missing or stale.
 
 ---
 
-## Nix-research integration (v0.10+)
+## Vidi agent integration (v0.10+)
 
 The 🔭 button on every Kanban card calls
-`POST /api/research/:videoId`, which spawns a Vidi agent via
+`POST /api/research/:videoId`, which spawns the **Vidi** subagent via
 [OpenClaw](https://github.com/openclaw/openclaw) and streams the
 result back. The frontend polls every 2 s and updates a persistent
 toast with live progress (e.g. "🔍 Recherche läuft… (40 s · 2
@@ -234,24 +237,14 @@ The result opens in a modal with full markdown rendering (via
 self-aware: it checks whether a script already exists for the video
 and skips a duplicate push.
 
+**Vidi is a scout, not a coach.** It gathers vidIQ data and quotes
+sources. Strategic recommendations come from Nix (the main agent).
+See `docs/vidi-agent.md` for the full architecture, role split,
+cost model, and operational checklist.
+
 For this to work, set `OPENCLAW_GATEWAY_URL` and
 `OPENCLAW_GATEWAY_TOKEN` in your `.env`. If you don't, the 🔭 button
 gracefully responds with a clear error message.
-
----
-
-## For the maintainer (Dirk's local setup)
-
-When running on `asbach-games` directly (no Docker), the live process
-is started and supervised by `restart.sh`. A few notes that are not
-relevant for GitHub readers:
-
-- The manual start command is `./restart.sh`, not `node index.js`. The
-  script is idempotent and uses `./contentix.pid` to track the process.
-- Logs go to `./contentix.log` (gitignored) and stdout.
-- The host also runs NixBoard, OpenWebUI, n8n, Qdrant and other
-  services — Contentix is on port `3038` and is reverse-proxied at
-  `contentix.asbach-games.fritz.box`.
 
 ---
 
@@ -268,10 +261,11 @@ sport = :3038` to find it manually.
 Either your `VIDIQ_API_KEY` is wrong/expired, or you haven't triggered
 a refresh yet. Hit the "vidIQ refresh" button in the sidebar.
 
-### `🔭 Nix-Research` button does nothing
+### `🔭 Vidi-Research` button does nothing
 
 Check that `OPENCLAW_GATEWAY_URL` and `OPENCLAW_GATEWAY_TOKEN` are set
 in `.env` and that your OpenClaw gateway is running and reachable.
+See `docs/vidi-agent.md` for the full operational checklist.
 
 ### Kanban columns stack vertically
 

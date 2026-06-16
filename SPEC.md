@@ -30,7 +30,7 @@ AI-research integration.
 | Default port | `3038` (configurable via `PORT`) |
 | Reverse proxy | any (we use nginx in production) |
 | vidIQ | MCP HTTP(SSE) — on-request, cached aggressively |
-| OpenClaw | optional — for the v0.10+ Nix-research feature |
+| OpenClaw | optional — for the v0.10+ Vidi-research feature |
 | Container | `node:20-alpine`, multi-stage not needed |
 
 ---
@@ -171,7 +171,7 @@ See [MAKINGOF.md](./MAKINGOF.md) for the full story. TL;DR:
 - 5 seasonal themes replaced the single dark theme.
 - The script editor was added (markdown + link to video + print view).
 - The history view was added (soft archive instead of hard DELETE).
-- The Nix-research bridge (v0.10) was added — Contentix can now
+- The Vidi-research bridge (v0.10) was added — Contentix can now
   trigger a Vidi AI-research run and stream the result back.
 
 ---
