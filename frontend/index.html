@@ -130,30 +130,56 @@
 
 
       <div id="bibliothekView" class="view-panel" style="display: none;">
-        <div class="bibliothek-header" style="padding: 32px 32px 24px; border-bottom: 1px solid var(--border-subtle);">
-          <h1 style="font-size: 24px; font-weight: 700; letter-spacing: -0.5px;">Bibliothek</h1>
-          <p class="bibliothek-subtitle">Lädt...</p>
+        <div class="bibliothek-header" style="padding: 32px 32px 24px; border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: flex-end;">
+          <div>
+            <h1 style="font-size: 24px; font-weight: 700; letter-spacing: -0.5px;">Bibliothek</h1>
+            <p class="bibliothek-subtitle">Lädt...</p>
+          </div>
+          <div class="nix-toggle" id="nixToggle" title="Hook-Stil umschalten">
+            <span class="dot"></span>
+            <span class="label">🌶️ Hooks: Alle</span>
+          </div>
         </div>
         <div style="padding: 24px 32px;">
-          <div class="lib-grid">
-            <div class="lib-col">
-              <div class="lib-col-header">
-                <h2>Neueste Videos</h2>
-                <span class="badge" id="newestCount">—</span>
-              </div>
-              <div class="video-list" id="newestList">
-                <div class="bibliothek-empty">Lade neueste Videos...</div>
-              </div>
+          <!-- Hero-Spot -->
+          <div class="lib-hero" id="libHero" style="display: none;">
+            <div class="lib-hero-thumb">
+              <div class="lib-hero-badge">🌟 NEUESTER RELEASE</div>
             </div>
-            <div class="lib-col">
-              <div class="lib-col-header">
-                <h2>Meistgesehen</h2>
-                <span class="badge" id="topCount">—</span>
+            <div class="lib-hero-content">
+              <div>
+                <div class="lib-hero-cat" id="libHeroCat">—</div>
+                <h2 class="lib-hero-title" id="libHeroTitle">—</h2>
+                <div class="lib-hero-hook" id="libHeroHook">—</div>
+                <div class="lib-hero-meta" id="libHeroMeta"></div>
               </div>
-              <div class="video-list" id="topList">
-                <div class="bibliothek-empty">Lade Top-Videos...</div>
-              </div>
+              <a class="lib-hero-cta" id="libHeroCta" href="#" target="_blank" rel="noopener">→ Zum Video</a>
             </div>
+          </div>
+          
+          <!-- Zwei 2x3 Grids -->
+          <div class="lib-grids">
+            <div class="lib-section">
+              <div class="lib-section-header">
+                <span class="lib-section-icon">📅</span>
+                <h3 class="lib-section-title">Letzte 6</h3>
+                <span class="lib-section-count">— sortiert nach Veröffentlichungsdatum</span>
+              </div>
+              <div class="lib-cards" id="newestList"></div>
+            </div>
+            <div class="lib-section">
+              <div class="lib-section-header">
+                <span class="lib-section-icon">🏆</span>
+                <h3 class="lib-section-title">Evergreens</h3>
+                <span class="lib-section-count">— Top-Views aller Zeiten</span>
+              </div>
+              <div class="lib-cards" id="topList"></div>
+            </div>
+          </div>
+          
+          <!-- Footer: Alle anzeigen -->
+          <div class="lib-footer">
+            <a href="#" class="lib-show-all" id="libShowAll">Alle <span id="libTotalCount">0</span> Videos anzeigen →</a>
           </div>
         </div>
       </div>

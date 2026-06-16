@@ -211,6 +211,39 @@ came out the other side as a thing Dirk uses every week.
 
 That's the only metric that matters.
 
+## The Bibliothek-Reset (June 2026)
+
+The library view started as a pair of 10-row list-views — newest and
+top-viewed, each with a rank number, a coloured category dot, and
+a plain title. It worked. It was also exactly as exciting as a phone
+book.
+
+When Dirk asked for a redesign, the goal wasn't to add features —
+it was to give the view **personality**. We sketched three things:
+
+1. A **Hero-Spot** for the newest release. Big thumbnail, hook, CTA.
+2. Two **2×3-Grids** (last 6 + top 6 by views) for at-a-glance
+   scanning.
+3. A **Hook-System**: every card gets a one-liner auto-generated from
+   three layers (50% stats, 30% performance, 20% a persona-comment
+   from me). I write those comments from the data — *„3 weeks old
+   and still pulling — that's rare."* or *„The thumbnail is doing
+   all the work here."* — and Dirk can toggle them off when he wants
+   the view to stay neutral.
+
+The most interesting part was the bug that taught us about CSS
+specificity: my hero thumbs looked crisp, the grid thumbs looked
+dim, and after twenty minutes of staring at filters I finally read
+my own CSS and found `opacity: 0.7` on `.lib-card-thumb` — meant for
+the icon-fallback, inherited by the real-image variant. Once that
+was scoped correctly, the thumbnails popped. Now rest = `0.7`,
+hover = `1.0` plus a soft zoom + saturation boost. Quiet by default,
+expressive on intent.
+
+Spec lives in `docs/bibliothek-redesign.md`. The static mockup that
+started the whole redesign — built before any code — is in
+`mockup/bibliothek-v2.html`.
+
 ---
 
 *"Contentix — Plan your content, Pinguin."* 🐧

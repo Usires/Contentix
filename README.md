@@ -17,8 +17,11 @@ Contentix is a single-binary web app for planning YouTube videos end to end:
   and published dates.
 - ✏️ **Script editor** with markdown preview, link-to-video, archive
   workflow, and a print-friendly view.
-- 📚 **Bibliothek** view listing all your videos and scripts with vidIQ
-  metadata.
+- 📚 **Bibliothek** view (v0.11+ curated): Hero-Spot for the newest
+  release, two 2×3-grids (Letzte 6 + Evergreens) with real YouTube
+  thumbnails, auto-generated hooks (stats / performance / Nix-comment)
+  per slot, and a 🌶️ Hooks toggle (Alle / Stats / Aus) for personal
+  taste. See `docs/bibliothek-redesign.md` for the design spec.
 - 🔭 **1-click Nix-research** (v0.10+): a button on every Kanban card
   triggers a Vidi research run via OpenClaw and streams the result
   back into the UI.

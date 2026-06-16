@@ -20,6 +20,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - v0.11: Cleanup pass on remaining `position`-field dead code (never written
   by any UI flow; candidate for removal before 0.11).
 
+## [0.11.0] — 2026-06-16
+
+### Added
+- **📚 Bibliothek-Redesign (Hero + 2×3-Grids)**: the video library
+  is now a curated, personal overview instead of two long list-views.
+  New structure:
+  - **Hero-Spot** (top): the newest published video with large thumbnail,
+    title, category, hook, and meta-row.
+  - **📅 Letzte 6** (left grid): chronological order, skip Hero.
+  - **🏆 Evergreens** (right grid): top 6 by lifetime views.
+  - **🌶️ Hook-Toggle** (top right): 3 modes — `Alle` (default),
+    `Stats` (no Nix), `Aus`. Persisted in `localStorage`.
+- **Hook-System (3 layers)**: each slot gets a one-liner hook auto-generated
+  from three layers (50 % stats, 30 % performance, 20 % Nix-comment). The
+  Nix-comments are persona-driven observations — observational, not advisory.
+- **Real video thumbnails**: `thumbnail_url` from the API is rendered as
+  `<img>` with `onerror` fallback to the gradient+icon placeholder.
+  Pre-fix the cards inherited `opacity: 0.7` from the placeholder
+  variant, making real thumbs look dim — that specificity bug is fixed.
+- **Card hover interaction**: rest state `opacity: 0.7`, hover state
+  `opacity: 1.0` plus a soft `scale(1.08) + brightness/saturate` boost
+  on the image, a centred play-icon overlay, and a violet title colour.
+  Quiet by default, expressive on intent.
+- **Footer link** „Alle N Videos anzeigen →" surfaces the total count.
+
+### Changed
+- **`bibliothek.js`**: full rewrite as `loadBibliothek()` + `renderBibliothek()`,
+  with hook-style toggle and view-switch hook.
+- **`index.html`**: Bibliothek view-panel re-structures into Hero + Grids
+  (no more 2×10 list-views).
+- **`styles.css`**: appended ~290 lines for Hero, Grids, Cards, Hook-Toggle,
+  Thumbnail states, Footer. No removals, additive only.
+
+### Spec & Mockup
+- `docs/bibliothek-redesign.md` — design doc, hook schema, evergreen
+  logic, file-by-file change list, open questions, timeline.
+- `mockup/bibliothek-v2.html` — static HTML mockup with 13 fake
+  videos for visual review before implementation. Captures the final
+  layout, hook style, and 3-way toggle.
+
 ## [0.10.2] — 2026-06-11
 
 ### Added
