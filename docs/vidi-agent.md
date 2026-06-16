@@ -26,7 +26,7 @@ creator can read, copy, or expand into a script.
 | Agent | Role | Output |
 |-------|------|--------|
 | **Vidi** (this agent) | Research scout | Data tables, outlier lists, channel comparisons, keyword metrics, source quotes |
-| **Nix** (main agent) | Strategist + builder | Recommendations, scripts, plans, blog posts, ComfyUI workflows, system architecture |
+| **Nix** (main agent) | Strategist + builder | Recommendations, scripts, plans, blog posts, system architecture |
 
 The split is intentional: Vidi doesn't know Dirk well enough to
 coach, and Nix doesn't want to spend tokens scraping vidIQ. They
