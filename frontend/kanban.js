@@ -137,13 +137,13 @@ function renderCard(card) {
     </div>
     ${card.notes ? `<div class="kanban-card__notes">${escapeHtml(card.notes)}</div>` : ''}
     ${hasResearch ? `<div class="nix-research">
-      <div class="nix-research__header">Nix sagt:</div>
+      <div class="nix-research__header">Vidi 🔭 sagt:</div>
       <div class="nix-research__text">${escapeHtml(truncate(card.nix_comment, 120))}</div>
     </div>` : ''}
     <div class="kanban-card__footer">
       <div class="kanban-card__actions">
         <button class="kanban-card__action" data-action="edit" data-id="${card.id}" title="Bearbeiten">Bearbeiten</button>
-        ${['planned','research','script'].includes(card.status) ? `<button class="kanban-card__action kanban-card__action--nix" data-action="nix-research" data-id="${card.id}" title="Vidi 🔭 Research starten">🔭 Nix</button>` : ''}
+        ${['planned','research','script'].includes(card.status) ? `<button class="kanban-card__action kanban-card__action--nix" data-action="nix-research" data-id="${card.id}" title="Vidi 🔭 Research starten">🔭 Vidi</button>` : ''}
         <button class="kanban-card__action" data-action="delete" data-id="${card.id}" title="Löschen">Löschen</button>
       </div>
     </div>

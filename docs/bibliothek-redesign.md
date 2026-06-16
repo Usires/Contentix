@@ -78,7 +78,7 @@ Relativ zum Channel-Durchschnitt.
 - `„Bester Launch der letzten 30 Tage"`
 
 ### Schicht 3 — Nix-Kommentar (20% Wahrscheinlichkeit)
-Generiert von mir (Nix), lokales Ollama-Modell, gecacht in Qdrant 24h.
+Generiert von mir (Nix), lokales LLM, gecacht 24h in einem Vektor-Store.
 
 **Beispiele:**
 - `„Dirk, das wird ein Evergreen. Schau in 2 Jahren nochmal drauf."`
@@ -129,17 +129,17 @@ LIMIT 6;
 
 **Stats-Hooks (Schicht 1+2):**
 - Direkt im Frontend berechnet, kein Backend-Roundtrip
-- Quellen: `/api/videos-with-stats` (gibt's schon), mit 24h-View-Delta aus Qdrant `nix-memory`
+- Quellen: `/api/videos-with-stats` (gibt's schon), mit 24h-View-Delta aus einem lokalen Vektor-Store
 
 **Nix-Kommentare (Schicht 3):**
 - Trigger: beim ersten Render der Bibliothek pro Session
-- 1 Ollama-Call pro Video (Slot), Modell `qwen3.5` (6s/Call, 6 Videos parallel = 1-2s)
+- 1 lokaler LLM-Call pro Video (Slot), ~1-2s, 6 Videos parallel
 - Output: 1 Satz (max 100 Zeichen), lokal gewürfelt aus Templates
-- Cache: Qdrant-Collection `nix-bibliothek-hooks` mit 24h-TTL
+- Cache: Vektor-Store-Collection mit 24h-TTL
 - Bei Cache-Miss: neu generieren
 - Cache-Key: `{videoId}:{hookLayer}:{date-seed}`
 
-**Falls Ollama ausfällt:**
+**Falls das lokale LLM ausfällt:**
 - Fallback auf Schicht 1+2, kein UI-Fehler
 - Subtiler Hinweis: kleines „Nix ist grad still"-Icon (optional)
 
@@ -149,8 +149,8 @@ LIMIT 6;
 
 - `GET /api/videos-with-stats` (gibt's schon, mit `views`, `publishedAt`, `thumbnail_url`, `youtube_url`, `title`, `duration`)
 - Lokal: `channel-avg-views` = Mittelwert aller `views`, berechnet beim Render
-- Lokal: `recent-views-delta` = 24h-Differenz aus Qdrant-View-Snapshots (aufzubauen, falls nicht da)
-- Qdrant-Collection: `nix-bibliothek-hooks` (zu erstellen)
+- Lokal: `recent-views-delta` = 24h-Differenz aus View-Snapshots (aufzubauen, falls nicht da)
+- Vektor-Store-Collection: `bibliothek-hooks` (zu erstellen)
 
 ---
 
@@ -162,8 +162,8 @@ LIMIT 6;
 | `frontend/styles.css` (oder `bibliothek.css`) | Neue Layout-Styles für Hero + Grid-Cards |
 | `frontend/index.html` | Neuer `<div class="bibliothek-hero">` Container |
 | `backend/index.js` (oder `routes/bibliothek.js`) | Optional: neue Route `/api/bibliothek-hooks` |
-| Qdrant-Collection | `nix-bibliothek-hooks` (24h TTL) |
-| Ollama-Skript | `scripts/nix-bibliothek-hooks.py` (Hook-Generator) |
+\| Vektor-Store-Collection \| `bibliothek-hooks` (24h TTL) \|
+| Hook-Generator | `scripts/bibliothek-hooks.py` (lokales LLM) |
 
 ---
 

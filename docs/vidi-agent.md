@@ -172,7 +172,7 @@ Putting research into a subagent gives us three things the main
 session can't:
 
 1. **Isolation.** A 200k-context M3 call for a 10-minute research
-   loop is overkill. Vidi runs on `ollama/qwen3.5` locally — ~6s
+   loop is overkill. Vidi runs on a small local model — sub-second
    per call, no per-token cost, and the main session keeps its
    context for the actual work.
 2. **Specialisation.** Vidi's SOUL, IDENTITY and USER docs are
