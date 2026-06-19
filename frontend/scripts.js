@@ -63,6 +63,14 @@ function renderScriptsView() {
           <input type="text" id="scriptSearchInput" placeholder="🔍 Suchen…" />
         </div>
         <div class="scripts-tree" id="scriptsTree"></div>
+        <div class="scripts-status-legend" id="scriptsStatusLegend">
+          <div class="status-legend-title">Legende</div>
+          <div class="status-legend-row"><span class="status-legend-icon">⚪</span><span class="status-legend-label">Draft</span></div>
+          <div class="status-legend-row"><span class="status-legend-icon">🟡</span><span class="status-legend-label">In Review</span></div>
+          <div class="status-legend-row"><span class="status-legend-icon">🟢</span><span class="status-legend-label">Final</span></div>
+          <div class="status-legend-row"><span class="status-legend-icon">📦</span><span class="status-legend-label">Archiviert</span></div>
+          <div class="status-legend-row"><span class="status-legend-icon">🎬</span><span class="status-legend-label">Mit Video verlinkt</span></div>
+        </div>
         <div class="scripts-list-footer">
           <span id="scriptCount">${allScripts.length} Skripte</span>
         </div>
@@ -753,6 +761,7 @@ function renderEditorHTML() {
         <button class="btn btn--secondary" onclick="archiveScript()" title="Skript archivieren (nicht löschen)">📦 Archivieren</button>
         <button class="btn btn--danger" onclick="deleteScript()" title="Skript endgültig löschen">🗑️ Löschen</button>
         <button class="btn btn--primary" onclick="saveScript()">💾 Speichern</button>
+        ${renderApproveButton()}
       </div>
     </div>
   `;
@@ -1135,4 +1144,52 @@ function setupScriptsNav() {
       initScripts();
     });
   });
+}
+
+// ─── Approve & Move to Script (research → script) ──────────────────────────
+function getLinkedVideoStatus() {
+  if (!activeScript || !activeScript.video_id) return null;
+  if (!window._allVideos) return null;
+  const v = window._allVideos.find(x => x.id === activeScript.video_id);
+  return v ? v.status : null;
+}
+
+function renderApproveButton() {
+  const linkedStatus = getLinkedVideoStatus();
+  if (!activeScript || !activeScript.video_id || linkedStatus !== 'research') {
+    return '';
+  }
+  const videoTitle = getVideoTitle(activeScript.video_id) || 'verlinktes Video';
+  return `<button class="btn btn--approve" onclick="approveAndMoveToScript()" title="Video ${escapeHtml(videoTitle)} von 'research' auf 'script' moven — signalisiert: Skript ist freigegeben für die Aufnahme-Phase">🟢 Approve & move to script</button>`;
+}
+
+async function approveAndMoveToScript() {
+  if (!activeScript || !activeScript.video_id) return;
+  const linkedStatus = getLinkedVideoStatus();
+  if (linkedStatus !== 'research') {
+    showToast?.(`Video ist bereits im Status '${linkedStatus}', kein Move nötig.`) ||
+      alert(`Video ist bereits im Status '${linkedStatus}', kein Move nötig.`);
+    return;
+  }
+  if (!confirm(`Video "${getVideoTitle(activeScript.video_id)}" auf Status 'script' moven?\n\nDas signalisiert: Skript ist freigegeben für die Aufnahme-Phase.`)) return;
+
+  try {
+    const res = await fetch(`${API}/videos/${activeScript.video_id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'script' })
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    // Update local state
+    const v = window._allVideos.find(x => x.id === activeScript.video_id);
+    if (v) v.status = 'script';
+    showToast?.('✅ Video-Status auf "script" gesetzt.') ||
+      alert('✅ Video-Status auf "script" gesetzt.');
+    renderEditor(); // re-render to hide the button (no longer research)
+    refreshTree();
+  } catch (err) {
+    console.error('approveAndMoveToScript failed:', err);
+    showToast?.(`❌ Fehler beim Move: ${err.message}`) ||
+      alert(`❌ Fehler beim Move: ${err.message}`);
+  }
 }

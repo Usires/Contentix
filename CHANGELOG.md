@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] — 2026-06-19
 ## [0.12.0] — 2026-06-19
 
 ### Security & Reliability
@@ -31,6 +32,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Bild-Fehlschlag). CSS `::before` ist jetzt sauber nur-Fallback.
 
 ### Added
+- **🟢 Approve & Move to Script-Button** im Skript-Editor.
+  Zeigt sich nur, wenn das aktive Skript mit einem Video im
+  Status `research` verlinkt ist. Ein-Klick-Move mit
+  Bestätigungs-Dialog. Vermeidet das ständige manuelle
+  Status-PATCHen per curl und macht den research → script
+  Schritt für Dirk direkt in der UI erfahrbar.
+- **📋 Status-Legende** in der Skripte-Sidebar: zeigt die 5
+  Status-Emojis (⚪ Draft, 🟡 In Review, 🟢 Final, 📦 Archiviert,
+  🎬 Mit Video verlinkt) mit Beschriftung. Verhindert, dass
+  man sich die Bedeutungen merken muss — vorher nirgends
+  dokumentiert.
 - **🧪 Playwright-Test-Suite für Contentix** (Foundation).
   - `playwright.config.js`: testDir `./tests`, baseURL `http://localhost:3038`,
     sequenziell (single-user Node-App).

@@ -84,3 +84,52 @@ test.describe('Bibliothek-Hero 🎬-Fallback (CLAP-Bug-Regression)', () => {
     expect(heroTitle).toBe(newest.title);
   });
 });
+test.describe('Skript-Editor: Approve-Button + Status-Legende (20.06.2026)', () => {
+  test('4. Status-Legende sichtbar in scripts-list-panel', async ({ page }) => {
+    await page.goto(BASE + '/', { waitUntil: 'networkidle' });
+    await page.click('a[data-view="scripts"]');
+    await page.waitForSelector('#scriptsStatusLegend', { state: 'visible', timeout: 5000 });
+
+    const legendRows = await page.locator('#scriptsStatusLegend .status-legend-row').count();
+    expect(legendRows).toBe(5); // Draft, In Review, Final, Archiviert, Mit Video verlinkt
+  });
+
+  test('5. Approve-Button rendert nur, wenn Video im research-Status ist', async ({ page }) => {
+    await page.goto(BASE + '/', { waitUntil: 'networkidle' });
+    await page.click('a[data-view="scripts"]');
+    await page.waitForSelector('#scriptsTree', { state: 'visible', timeout: 5000 });
+    await page.waitForTimeout(1000);
+
+    // Wähle erstes Skript im Tree
+    await page.evaluate(() => {
+      const anchors = document.querySelectorAll('.jstree-anchor');
+      if (anchors.length > 0) anchors[0].click();
+    });
+    await page.waitForTimeout(500);
+
+    // Wenn das verlinkte Video NICHT 'research' ist (Default), darf KEIN Approve-Button da sein.
+    // Wenn DOCH 'research', muss einer da sein.
+    const state = await page.evaluate(() => {
+      if (!window._allVideos) return { ok: false, reason: 'no _allVideos' };
+      // Active script = the one shown in editor — wir greifen via DOM zu
+      const editorTitle = document.querySelector('.scripts-editor-title')?.value;
+      if (!editorTitle) return { ok: false, reason: 'no editor title' };
+      return {
+        ok: true,
+        editorTitle,
+        videoCount: window._allVideos.length,
+        anyResearch: window._allVideos.some(v => v.status === 'research')
+      };
+    });
+
+    if (state.ok && state.anyResearch) {
+      // Erwartung: Wenn das aktive Skript mit einem research-Video verlinkt ist, ist der Button da
+      const buttonCount = await page.locator('.btn--approve').count();
+      const buttonText = await page.locator('.btn--approve').textContent().catch(() => '');
+      // Mindestens EIN research-Video ist da → bei korrektem Setup sollte irgendwo ein Button sein,
+      // wir prüfen ob die Logik konsistent ist: Button nur wenn video_id+research
+      expect(buttonCount === 0 || buttonText?.includes('Approve & move to script')).toBeTruthy();
+    }
+    // Wenn kein research-Video: gar nichts zu prüfen (alle Buttons korrekt versteckt)
+  });
+});

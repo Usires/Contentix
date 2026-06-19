@@ -1432,6 +1432,68 @@ body.modal-open {
   text-align: right;
 }
 
+.scripts-status-legend {
+  padding: 10px 14px 8px;
+  border-top: 1px solid rgba(42, 32, 48, 0.08);
+  font-size: 10px;
+  color: #6b5f75;
+  font-family: 'JetBrains Mono', monospace;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.scripts-status-legend .status-legend-title {
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-size: 9px;
+  color: #8a7c95;
+  margin-bottom: 4px;
+  text-align: right;
+}
+
+.scripts-status-legend .status-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.scripts-status-legend .status-legend-icon {
+  font-size: 11px;
+  width: 14px;
+  text-align: center;
+}
+
+.scripts-status-legend .status-legend-label {
+  color: #4a3f56;
+}
+
+.btn--approve {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.3px;
+  box-shadow: 0 1px 3px rgba(16, 185, 129, 0.3);
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.btn--approve:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.4);
+}
+
+.btn--approve:active {
+  transform: translateY(0);
+}
+
 /* ─── JSTree Overrides for Contentix theme ────────────────────────── */
 
 .scripts-tree .jstree-node {
