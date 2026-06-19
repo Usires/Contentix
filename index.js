@@ -184,10 +184,43 @@ function get(sql, ...params) {
   return results[0] || null;
 }
 
+// Atomic DB write: temp file + rename + backup. Prevents corruption from
+// mid-write crashes (power loss, OOM, disk full). POSIX rename() is atomic.
+let _saveInFlight = false;
+let _savePending = false;
+
 function saveDB() {
-  const data = db.export();
-  const buffer = Buffer.from(data);
-  fs.writeFileSync(DB_PATH, buffer);
+  // Coalesce concurrent save requests. If a save is already running, queue
+  // one more so the latest state lands on disk (no pile-up of writes).
+  if (_saveInFlight) { _savePending = true; return; }
+  _doSaveDB();
+}
+
+function _doSaveDB() {
+  _saveInFlight = true;
+  try {
+    const data = db.export();
+    const buffer = Buffer.from(data);
+    const tmpPath = DB_PATH + '.tmp';
+    const bakPath = DB_PATH + '.bak';
+
+    // 1. Write to temp file (sync, fails loud if disk is full)
+    fs.writeFileSync(tmpPath, buffer);
+
+    // 2. Atomic rename (POSIX guarantee)
+    fs.renameSync(tmpPath, DB_PATH);
+
+    // 3. Backup of last-known-good (fire-and-forget; never block main save)
+    try { fs.copyFileSync(DB_PATH, bakPath); } catch (e) { /* non-fatal */ }
+  } catch (e) {
+    log.error('saveDB failed:', e.message);
+    // Best-effort: if tmp is left behind, clean it up next time
+    try { fs.unlinkSync(DB_PATH + '.tmp'); } catch (e2) { /* ignore */ }
+    throw e;
+  } finally {
+    _saveInFlight = false;
+    if (_savePending) { _savePending = false; _doSaveDB(); }
+  }
 }
 
 // ─── vidIQ Utilities (extracted from route handlers) ──────────────────────────

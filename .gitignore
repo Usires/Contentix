@@ -37,3 +37,10 @@ insert-msfs.js
 msfs-linux-update.js
 mockup/*.png
 mockup/
+*.bak-pre-*
+*.bak2-pre-*
+
+# Playwright test artifacts (regenerated on every test run)
+playwright-report/
+test-results/
+playwright/.cache/

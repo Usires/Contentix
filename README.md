@@ -15,7 +15,11 @@ Contentix is a single-binary web app for planning YouTube videos end to end:
   videos that are actually live on YouTube.
 - 📅 **Calendar view** (Month + Week) with cards positioned by planned
   and published dates.
-- ✏️ **Script editor** with markdown preview, link-to-video, archive
+- ✏️ **Script editor** (JSTree-powered v0.11+): tree-view sidebar with
+  5 folders (scripts, Entwürfe, channel, resources, Archiv), drag & drop
+  between folders, status icons (⚪🟡🟢📦), live-search, right-click
+  context menu, folder icons (📁/📂), single-click toggle, and
+  localStorage-persisted state. Markdown preview, link-to-video, archive
   workflow, and a print-friendly view.
 - 📚 **Bibliothek** view (v0.11+ curated): Hero-Spot for the newest
   release, two 2×3-grids (Letzte 6 + Evergreens) with real YouTube
@@ -71,6 +75,22 @@ npm install
 
 `start.sh` is a thin wrapper around `restart.sh` — both are idempotent
 and use a PID file under `./contentix.pid`.
+
+## Tests (Playwright)
+
+A small Playwright suite covers the most visible UI regressions (the
+`tests/hero-fallback.spec.js` checks the library hero and its
+image-fallback path). Single-user app, so tests run sequentially.
+
+```bash
+npm install                  # also pulls @playwright/test
+npx playwright install chromium
+npm test                     # → 3 tests in tests/hero-fallback.spec.js
+```
+
+Add new specs under `tests/` — they auto-pick up via `testDir: './tests'`
+in `playwright.config.js`. HTML report goes to `playwright-report/`
+(`.gitignore`d).
 
 ---
 

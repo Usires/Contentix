@@ -5,7 +5,114 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.12.0] — 2026-06-19
+
+### Security & Reliability
+- **🔒 DB-Atomicity (`saveDB`)**: temp-file + atomic-rename + .bak-Backup.
+  Schützt vor Datenverlust bei Crash/OOM/Disk-full mid-write. POSIX
+  `rename()` ist atomar: entweder alte oder neue Version, nie halbe.
+  Concurrent saves werden coalesced (kein pile-up). Pre-Save-Backup als
+  letzte Verteidigung. Migration: 2x manuelle .bak-Dateien vor dem
+  Change angelegt.
+- **⚡ AutoSave ohne Tree-Rebuild**: `saveScript()` ruft jetzt nur
+  `updateScriptNodeLabel()` statt `refreshTree()`, wenn nur Content/Title
+  sich geändert haben. Folder/Status-Änderungen machen weiterhin den
+  vollen Refresh. **Fix:** Cursor-Sprung und potenzieller Textverlust
+  beim Auto-Save alle 30s — Textarea-DOM-Identität bleibt jetzt stabil.
+  Verifiziert: `textareaMarker: "PRESERVED"` nach Save.
+
+### Fixed
+- **🎬 Bibliothek-Hero: 🎬-Klappe nicht mehr als Geist-Icon über Bild**
+  (CLAP-Bug). `frontend/styles.css`: `.lib-hero-thumb.has-image::before {
+  display: none; }` versteckt das CSS-Pseudo-Element, wenn das Bild
+  erfolgreich lädt. `frontend/bibliothek.js`: onerror-Pfad bereinigt —
+  entfernt jetzt zusätzlich die `has-image`-Klasse und fügt kein
+  zusätzliches 🎬-Text-Knoten mehr ein (verhindert Doppel-Render bei
+  Bild-Fehlschlag). CSS `::before` ist jetzt sauber nur-Fallback.
+
+### Added
+- **🧪 Playwright-Test-Suite für Contentix** (Foundation).
+  - `playwright.config.js`: testDir `./tests`, baseURL `http://localhost:3038`,
+    sequenziell (single-user Node-App).
+  - `tests/hero-fallback.spec.js`: 3 Regression-Tests für den
+    CLAP-Bug — (1) Bild lädt → 🎬 versteckt, (2) Bild fehlt → 🎬
+    sichtbar + Gradient, (3) Hero zeigt neuestes published-Video
+    (API vs. UI Titel-Match). Sanity-Checked: bei Revert des CSS-Fixes
+    schlägt Test 1 fehl — Tests sind echte Regression-Tests, nicht
+    Theater-Tests.
+  - `npm test` führt die Suite aus. Vorher: `npm install` für
+    `@playwright/test` und `npx playwright install chromium`.
+  - Foundation für weitere QA-Tests (Skripte-Tree, Workflow-Board,
+    A11y-Smoke-Tests).
+
+### Added
+- **✂️ Text-Truncation mit Ellipsis** im Tree: lange Skript- und Folder-Namen
+  werden jetzt sauber mit `…` abgekürzt (`text-overflow: ellipsis` +
+  `white-space: nowrap`). Tree-Spalte scrollt nicht mehr horizontal.
+  Voller Titel als HTML-`title`-Attribut für Tooltip beim Hover.
+- **🌳 Skripte-Tree (JSTree-basiert)**: komplett neue Skripte-Sidebar.
+  - 5 Default-Folder: `scripts`, `Entwürfe`, `channel`, `resources`, `Archiv`
+  - **Drag & Drop**: Skripte zwischen Foldern verschieben, Reihenfolge ändern
+  - **Status-Icons**: ⚪ draft, 🟡 in-review, 🟢 final, 📦 archived
+  - **Status-Badges**: 🎬 für video-verlinkte Skripte, Wortzahl-Counter
+  - **Live-Search** im Tree (highlighted matches)
+  - **Right-Click-Context-Menü**: Skript (Öffnen/Duplizieren/Archivieren/Löschen),
+    Folder (Neues Skript/Umbenennen/Löschen)
+  - **localStorage-Persistenz**: offene/zu-geklappte Folder, letzte Suche
+  - **Smart Archive**: Drag in Archiv-Folder setzt `status: "archived"`
+    automatisch; Drag aus Archiv stellt auf `draft` zurück
+  - **Archiv ist standardmäßig zugeklappt** (visual = weggeräumt)
+  - **Custom Folder** anlegbar über Header-Button oder Context-Menü
+  - **Folder-Icons**: 📁 zugeklappt, 📂 aufgeklappt, mit Hover-Scale-Effekt
+  - **Single-Click Toggle**: Folder öffnen/schließen per einfachem Klick
+    (vorher nur Doppelklick); Selection-Highlight wird gecleart
+  - **wholerow-Plugin**: ganze Zeile ist klickbar, nicht nur der Text
+
+### Fixed
+- **🖱️ Klick-Bug bei langen Titeln**: durch das `wholerow`-Plugin wurden
+  JSTree-Listenelemente über die Spaltenbreite hinaus gedehnt (Anchor
+  477px in einer 280px-Spalte), sodass Klicks auf den Text ins Leere
+  gingen. Fix: `wholerow`-Plugin entfernt, Tree-Container auf
+  `overflow-x: hidden` gesetzt, `.jstree-children` korreliert mit Parent.
+- **🛡️ Stack-Overflow in `renderPreview`**: lange Skripte (MechWarrior = 17k
+  Zeichen) mit triple-backtick Code-Blocks sprengten den JS-Stack. Fix:
+  Code-Fences werden via `split` separiert (kein backtracking), Input
+  auf 50k Zeichen gecappt, Listen line-by-line verarbeitet.
+- **🔄 Endlos-Loop bei `select_node`**: `selectScript()` rief
+  `jsTreeInstance.select_node()` zur visuellen Sync auf, was wieder
+  `select_node`-Event feuerte. Fix: visueller Sync nur über
+  `state.selected` im Tree-Build, kein expliziter `select_node`-Call.
+- **📁 Folder-Liste dokumentiert**: AGENTS.md listete 4 Folder auf, real
+  waren nur 2 in der DB. Frontend hat jetzt eine hartcodierte Default-
+  Liste + DB-Folder, was Migration erleichtert.
+- **📦 3 archivierte Skripte in Archiv migriert** (NOLF, MSFS 2024, MangoHud).
+  Eines davon (MSFS 2024) hatte eine falsche ID in der ersten Migration.
+- **🌲 JSTree-Quirk: Single-Click auf Folder öffnete nicht**: JSTree's
+  Default-`open_node()` ist ein No-Op für Folder, deren Children beim
+  Schließen aus dem DOM entfernt wurden. Fix: vor `open_node()` die
+  Children aus dem gecachten `allScripts`-Array re-injizieren.
+- **💾 localStorage-Persistenz timing**: `persistTreeState()` lief
+  synchron mit `open_node()`, bevor JSTree den State aktualisiert hatte.
+  Fix: 50ms-Verzögerung vor dem Persist, damit der State korrekt ist.
+- **🎯 Selection-Highlight auf Folder**: nach Klick blieb der Lila-Highlight
+  auf Foldern kleben. Fix: `deselect_all(true)` mit Silent-Mode im
+  setTimeout.
+
+### Changed
+- **`scripts.js`**: kompletter Rewrite (35.6 KB). Vanilla JSTree statt
+  selbstgebauter Card-Liste. API-kompatibel zu vorher (alle Editor-Buttons
+  funktionieren weiterhin).
+
+### Security & Data
+- ⚠️ **Wichtig**: Inhalt von `c442d667-734b-43f1-b54b-5caa73b1b962`
+  (MangoHud-Skript) wurde während Smoke-Test versehentlich mit
+  Platzhalter überschrieben. Wiederhergestellt aus Backup in
+  `/home/dirk/scripts/5-tipps-linux-gaming.md` (283 Zeilen, 10496
+  Zeichen). **Lehre**: vor Code-Tests an einer Live-DB ein
+  DB-Snapshot in `.bak` anlegen.
+- **🔄 Archiv-Skripte re-migriert**: bei Drag&Drop-Smoke-Tests
+  wurden die 3 Archiv-Skripte versehentlich nach `scripts` zurück-
+  gemoved. Re-Migration manuell durchgeführt.
 
 ### Planned
 - v0.11: Markdown body inside research-result modal gets progress visualisation
@@ -17,6 +124,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   between stderr-buffering and polling.
   (The frontend polling of `GET /api/research/:jobId` shipped in
   v0.10.0 — that's done. This is about the *progress-source*.)
+- v0.11: `script_folders` table — proper canonical folder list with
+  parent/position, instead of free-form string. Will require migration.
 - v0.11: Cleanup pass on remaining `position`-field dead code (never written
   by any UI flow; candidate for removal before 0.11).
 

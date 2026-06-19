@@ -177,8 +177,16 @@ function slugify(s) {
 }
 ```
 
-**`folder`** is one of: `scripts` (default), `channel`, `resources`,
-or any custom string. The frontend groups scripts by folder.
+**`folder`** is one of the default folders `scripts`, `Entwürfe`,
+`channel`, `resources`, `Archiv`, or any custom string. The frontend
+groups scripts by folder. The `Archiv` folder is collapsed by default
+and drag & drop into/from it auto-flips the `status` field between
+`archived` and `draft`.
+
+**`status`** is one of: `draft` (default), `in-review`, `final`,
+`archived`. The archive-state can be set manually or by dragging a
+script into the `Archiv` folder. Use `POST /api/scripts/:id/restore`
+to bring an archived script back.
 
 ---
 

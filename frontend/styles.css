@@ -1389,6 +1389,321 @@ body.modal-open {
   color: #2a2030;
 }
 
+.scripts-list-header-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.scripts-search {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(42, 32, 48, 0.08);
+}
+
+.scripts-search input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid rgba(42, 32, 48, 0.12);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  color: #2a2030;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.scripts-search input:focus {
+  border-color: var(--nix-violet);
+  box-shadow: 0 0 0 2px var(--nix-glow);
+}
+
+.scripts-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.scripts-list-footer {
+  padding: 8px 14px;
+  border-top: 1px solid rgba(42, 32, 48, 0.08);
+  font-size: 10px;
+  color: #6b5f75;
+  font-family: 'JetBrains Mono', monospace;
+  text-align: right;
+}
+
+/* ─── JSTree Overrides for Contentix theme ────────────────────────── */
+
+.scripts-tree .jstree-node {
+  margin: 1px 0;
+}
+
+.scripts-tree .jstree-children {
+  padding-left: 14px;
+}
+
+.scripts-tree .jstree-anchor {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: #2a2030;
+  line-height: 1.4;
+  transition: background 0.1s;
+  text-decoration: none;
+  position: relative;
+  min-height: 26px;
+}
+
+.scripts-tree .jstree-anchor:hover {
+  background: var(--nix-glow);
+}
+
+.scripts-tree .jstree-clicked {
+  background: var(--nix-soft) !important;
+  color: var(--nix-violet-dim) !important;
+  font-weight: 600;
+}
+
+.scripts-tree .jstree-hovered {
+  background: var(--nix-soft);
+  box-shadow: inset 0 0 0 1px var(--nix-glow);
+}
+
+.scripts-tree .jstree-icon.jstree-themeicon {
+  display: none;
+}
+
+.scripts-tree .jstree-wholerow-hovered {
+  background: transparent;
+}
+
+/* (Folder icon is defined further down with hover behavior) */
+
+.scripts-tree .tree-folder-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #6b5f75;
+  margin-left: 6px;
+  padding: 1px 5px;
+  background: rgba(42, 32, 48, 0.06);
+  border-radius: 8px;
+  min-width: 16px;
+  text-align: center;
+}
+
+.scripts-tree li[data-folder="Archiv"] > .jstree-anchor {
+  opacity: 0.7;
+}
+
+/* Script node styling */
+.scripts-tree .tree-script-label {
+  flex: 1;
+  min-width: 0;  /* allow flex shrink */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+
+/* Folder label same treatment */
+.scripts-tree .tree-folder-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+/* Anchor (whole row) is constrained to parent — prevents overflow */
+.scripts-tree .jstree-anchor {
+  max-width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: #2a2030;
+  line-height: 1.4;
+  transition: background 0.1s;
+  text-decoration: none;
+  position: relative;
+  min-height: 26px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Wholerow also constrained */
+.scripts-tree .jstree-wholerow {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+/* Tree container prevents horizontal overflow */
+.scripts-tree {
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 6px 8px;
+  font-size: 13px;
+  min-width: 0;  /* allow flex shrink */
+}
+
+.scripts-tree .tree-script-archived {
+  opacity: 0.55;
+  font-style: italic;
+}
+
+.scripts-tree .tree-words {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: #999;
+  margin-left: 4px;
+}
+
+.scripts-tree .tree-link-badge {
+  margin-left: 4px;
+  font-size: 11px;
+}
+
+/* Open/close triangle */
+.scripts-tree .jstree-ocl {
+  width: 16px;
+  height: 16px;
+  margin-right: 2px;
+  background-size: 12px;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.scripts-tree .jstree-leaf > .jstree-ocl {
+  cursor: default;
+  opacity: 0.2;
+}
+
+/* Folder-row visual cue: pointer cursor on the whole folder row */
+.scripts-tree li[data-folder] > .jstree-wholerow,
+.scripts-tree li[data-folder] > .jstree-anchor {
+  cursor: pointer !important;
+}
+
+.scripts-tree li[data-script-id] > .jstree-wholerow,
+.scripts-tree li[data-script-id] > .jstree-anchor {
+  cursor: default;
+}
+
+/* Folder icon + label spacing */
+.scripts-tree .tree-folder-icon {
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 0.15s;
+  user-select: none;
+}
+
+.scripts-tree .jstree-open li[data-folder] > .jstree-anchor .tree-folder-icon,
+.scripts-tree li[data-folder] > .jstree-anchor:hover .tree-folder-icon {
+  transform: scale(1.1);
+}
+
+/* Drop indicator */
+.scripts-tree .jstree-drop-hover {
+  background: var(--nix-soft);
+  box-shadow: inset 0 0 0 1px var(--nix-violet);
+}
+
+/* Search highlight */
+.scripts-tree .jstree-search-result {
+  background: var(--nix-glow);
+  color: var(--nix-violet-dim);
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+/* Context menu */
+.jstree-contextmenu {
+  background: #fff;
+  border: 1px solid rgba(42, 32, 48, 0.15);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(42, 32, 48, 0.18);
+  padding: 4px 0;
+  min-width: 180px;
+  font-size: 13px;
+}
+
+.jstree-contextmenu-inside {
+  background: #fff !important;
+}
+
+.vakata-context {
+  background: #fff !important;
+  border: 1px solid rgba(42, 32, 48, 0.15) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 8px 24px rgba(42, 32, 48, 0.18) !important;
+  padding: 4px 0 !important;
+  min-width: 180px !important;
+  font-size: 13px !important;
+  z-index: 9999 !important;
+}
+
+.vakata-context li {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.vakata-context li > a {
+  padding: 6px 14px !important;
+  color: #2a2030 !important;
+  display: block !important;
+  border-radius: 0 !important;
+  transition: background 0.1s;
+}
+
+.vakata-context li > a:hover {
+  background: var(--nix-glow) !important;
+  color: var(--nix-violet-dim) !important;
+}
+
+.vakata-context li.vakata-separator {
+  height: 1px !important;
+  background: rgba(42, 32, 48, 0.08) !important;
+  margin: 4px 0 !important;
+  border: 0 !important;
+}
+
+/* Toast notification */
+.scripts-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: #2a2030;
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 8px 24px rgba(42, 32, 48, 0.3);
+  z-index: 10000;
+  opacity: 0;
+  transition: opacity 0.2s, transform 0.2s;
+  pointer-events: none;
+}
+
+.scripts-toast--show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.scripts-toast--error {
+  background: #c44545;
+}
+
 .scripts-list {
   flex: 1;
   overflow-y: auto;
@@ -2390,6 +2705,13 @@ kbd {
   content: '🎬';
   font-size: 64px;
   opacity: 0.4;
+}
+
+/* FIX (Nix, 2026-06-19, CLAP): wenn ein Bild geladen ist, das Pseudo-Element verstecken.
+   Sonst schimmert das 🎬 als Geist-Icon über dem Bild. Das ::before ist nur als
+   Fallback gedacht (für onerror-Fall), nicht als permanente Deko. */
+.lib-hero-thumb.has-image::before {
+  display: none;
 }
 
 .lib-hero-badge {

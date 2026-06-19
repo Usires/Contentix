@@ -249,3 +249,101 @@ started the whole redesign — built before any code — is in
 *"Contentix — Plan your content, Pinguin."* 🐧
 
 By Nix 🐧 & Dirk, 2026. *"Number 5 is alive."*
+
+## The Skripte-Tree Push (June 2026)
+
+The script editor was the oldest view in Contentix. It was a simple
+flat card list — every script next to every other, no folder
+structure, no ordering beyond created_at. It worked, but it stopped
+scaling the moment Dirk crossed 8+ scripts.
+
+The redesign started the way all good redesigns start: with a
+mistake. I migrated 3 archived scripts to a new "Archiv" folder
+manually via curl, and one of them used the wrong UUID. NOLF ended
+up in Archiv, but MSFS 2024 stayed in scripts. Classic.
+
+Then we did the **sketch round**. Five default folders, flat hierarchy
+("channel", "resources", "Entwürfe", "scripts", "Archiv" — last
+one always collapsed). JSTree as the engine, not a custom tree, because
+drag & drop, context menus, and search are all built in. We had JSTree
+in the bundle since day one but never used it.
+
+**The implementation was a 35 KB rewrite of `scripts.js`**, which
+sounds dramatic but it was mostly JSTree config: data shape, drag
+plugin, search plugin, context menu. The hard parts were three subtle
+bugs we hit along the way:
+
+1. **The infinite select-loop**: my `selectScript()` called
+   `jsTreeInstance.select_node()` for visual sync, which fired
+   `select_node` again, which called `selectScript()` again. The
+   browser ran out of stack in 0.1 seconds. The fix was obvious in
+   hindsight: JSTree already syncs `state.selected` from the build
+   data, so the explicit `select_node` call was redundant.
+
+2. **The renderPreview stack overflow**: MechWarrior 2 is a 17k-character
+   script with triple-backtick code blocks. My old regex-based
+   markdown parser had a backtracking pattern that exploded on long
+   inputs. Splitting the string on backticks first (instead of using
+   a regex to find them) and capping input at 50k characters fixed it
+   permanently.
+
+3. **The "click goes nowhere" bug**: the JSTree `wholerow` plugin
+   stretched the list items to 477px wide — but the tree column was
+   only 280px. Klicks on the text landed outside the visible area.
+   The user thought clicks were broken. They weren't broken, they
+   were just hidden. Removing `wholerow` and adding
+   `text-overflow: ellipsis` to the labels fixed both observations
+   Dirk made in the same breath.
+
+The polish round that followed was small but important: folder
+icons (📁/📂) with hover scale, single-click toggle (no more
+double-click), title attributes for the truncated text, and
+localStorage persistence for which folders are open.
+
+**What I learned:** the most "obvious" bugs in this project have
+always been CSS specificity issues. A 20-minute read of the
+stylesheet beats an hour of testing every interaction. Always read
+the CSS first.
+
+By Nix 🐧 & Dirk, 2026. *"Tree-first, text-second, click-third."*
+
+## The 🎬-Klappe-Pseudo-Element bug (2026-06-19, CLAP)
+
+Dirk noticed the library hero showed a half-transparent 🎬 icon
+superimposed on the (working) thumbnail. Root cause was a CSS
+fallback pattern that was never finished:
+
+```css
+.lib-hero-thumb::before {
+  content: '🎬';  /* meant as a fallback when the image fails */
+  font-size: 64px;
+  opacity: 0.4;
+}
+```
+
+The `::before` is **always rendered** by default — there was no
+`.has-image` override to hide it when the image loaded. So you got
+the "ghost icon" over every successful thumbnail load. On top of
+that, the JS `onerror` handler *also* `insertAdjacentHTML`'d a 🎬
+text node, so when the image actually failed you got two
+stacked 🎬's (the `::before` at opacity 0.4 plus a full-opacity text
+node).
+
+Fix had three parts:
+- Add `.lib-hero-thumb.has-image::before { display: none; }` so the
+  pseudo-element only shows when it should.
+- Clean up the `onerror` handler in `bibliothek.js` so it just
+  swaps the class instead of injecting duplicate DOM.
+- Add `qabot`-style Playwright tests so the bug can't sneak back
+  in: `tests/hero-fallback.spec.js` (3 specs, all green).
+
+The whole bug-fix + test suite came in around 30 minutes of
+real work once the root cause was identified. The slow part was
+*finding* the root cause: the symptom (visible 🎬) and the
+mechanism (CSS `::before` always renders) were not directly
+connected in my head until I read the stylesheet end-to-end.
+AGENTS.md reminds me: "When debugging, read the CSS first" — and
+this was a textbook example of why.
+
+By Nix 🐧 & Dirk, 2026. *"Always render the fallback, never
+render it twice."*

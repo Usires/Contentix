@@ -1,4 +1,4 @@
-// ─── Contentix Script Editor ───────────────────────────────────────────────
+// ─── Contentix Script Editor (JSTree-powered) ──────────────────────────────
 // API defined in app.js
 
 // ─── State ─────────────────────────────────────────────────────────────────
@@ -6,6 +6,14 @@ let allScripts = [];
 let activeScript = null;
 let autoSaveTimer = null;
 let isDirty = false;
+let jsTreeInstance = null;
+
+// Default folders — order matters (Archiv always last, collapsed by default)
+const DEFAULT_FOLDERS = ['scripts', 'Entwürfe', 'channel', 'resources', 'Archiv'];
+const ARCHIV_FOLDER = 'Archiv';
+const TREE_STATE_KEY = 'contentix.scripts.treeState';
+const TREE_SEARCH_KEY = 'contentix.scripts.lastSearch';
+const TREE_WIDTH_KEY = 'contentix.scripts.sidebarWidth';
 
 // ─── Init ─────────────────────────────────────────────────────────────────
 async function initScripts() {
@@ -43,57 +51,661 @@ function renderScriptsView() {
 
   container.innerHTML = `
     <div class="scripts-layout">
-      <div class="scripts-list-panel">
+      <div class="scripts-list-panel" id="scriptsListPanel">
         <div class="scripts-list-header">
-          <h2>Skripte</h2>
-          <button class="btn-icon" onclick="createNewScript()" title="Neues Skript" style="width:32px;height:32px;border-radius:8px;border:1px solid rgba(42,32,48,0.15);background:#7c5cbf;color:#fff;cursor:pointer;font-size:16px;">+</button>
+          <h2>📂 Skripte</h2>
+          <div class="scripts-list-header-actions">
+            <button class="btn-icon" id="btnNewScript" title="Neues Skript in aktuellem Folder" style="width:28px;height:28px;border-radius:8px;border:1px solid rgba(42,32,48,0.15);background:#7c5cbf;color:#fff;cursor:pointer;font-size:14px;">+</button>
+            <button class="btn-icon" id="btnNewFolder" title="Neuer Folder" style="width:28px;height:28px;border-radius:8px;border:1px solid rgba(42,32,48,0.15);background:transparent;color:#2a2030;cursor:pointer;font-size:14px;">📁</button>
+          </div>
         </div>
-        <div class="scripts-list" id="scriptsList">
-          ${renderScriptsList()}
+        <div class="scripts-search">
+          <input type="text" id="scriptSearchInput" placeholder="🔍 Suchen…" />
+        </div>
+        <div class="scripts-tree" id="scriptsTree"></div>
+        <div class="scripts-list-footer">
+          <span id="scriptCount">${allScripts.length} Skripte</span>
         </div>
       </div>
       <div class="scripts-editor-panel" id="scriptsEditorPanel">
-        ${activeScript ? renderEditor() : renderEmptyState()}
+        <div class="scripts-editor-placeholder">Wähle ein Skript aus dem Tree.</div>
       </div>
     </div>
   `;
 
   setupEditorEvents();
+  setupHeaderButtons();
+  buildJsTree();
+  restoreTreeState();
+  restoreLastSearch();
+
+  // Render editor (either current active script or empty state)
+  renderEditor();
 }
 
-function renderScriptsList() {
-  if (allScripts.length === 0) {
-    return `<div class="script-empty">Noch keine Skripte.<br>Erstelle dein erstes.</div>`;
+// ─── JSTree Build ──────────────────────────────────────────────────────────
+function buildJsTree() {
+  const $tree = $('#scriptsTree');
+  if (!$tree.length) return;
+
+  if (jsTreeInstance) {
+    try { jsTreeInstance.destroy(); } catch (e) {}
+    jsTreeInstance = null;
   }
 
-  return allScripts.map(s => `
-    <div class="script-card ${activeScript?.id === s.id ? 'active' : ''}" onclick="selectScript('${s.id}')">
-      <div class="script-card__title">${s.title || 'Unbenannt'}</div>
-      <div class="script-card__meta">
-        <span>${s.content ? s.content.split(/\s+/).length : 0} Wörter</span>
-        ${s.folder ? `<span>📁 ${s.folder}</span>` : ''}
-      </div>
-      ${s.video_id ? `<div class="script-card__linked-video">🔗 ${getVideoTitle(s.video_id)}</div>` : ''}
-    </div>
-  `).join('');
+  // Ensure all default folders are present (even if empty in DB)
+  const folderSet = new Set(DEFAULT_FOLDERS);
+  allScripts.forEach(s => { if (s.folder) folderSet.add(s.folder); });
+  const orderedFolders = [
+    ...DEFAULT_FOLDERS.filter(f => folderSet.has(f)),
+    ...[...folderSet].filter(f => !DEFAULT_FOLDERS.includes(f)).sort()
+  ];
+
+  const treeData = orderedFolders.map(folder => {
+    const folderScripts = allScripts
+      .filter(s => s.folder === folder)
+      .sort((a, b) => (a.position || 0) - (b.position || 0) || a.title.localeCompare(b.title));
+
+    return {
+      id: `folder:${folder}`,
+      text: `<span class="tree-folder-icon" data-folder-icon="${folder}">📁</span><span class="tree-folder-label" title="${escapeHtml(folder)}">${escapeHtml(folder)}</span><span class="tree-folder-count">${folderScripts.length}</span>`,
+      type: 'folder',
+      li_attr: { 'data-folder': folder, 'title': `${folder} (${folderScripts.length} Skript${folderScripts.length === 1 ? '' : 'e'})` },
+      state: {
+        opened: true,
+        disabled: false
+      },
+      children: folderScripts.map(s => ({
+        id: `script:${s.id}`,
+        text: buildScriptNodeText(s),
+        type: 'script',
+        li_attr: { 'data-script-id': s.id, 'data-folder': folder, 'title': s.title || 'Unbenannt' },
+        state: { selected: activeScript?.id === s.id }
+      }))
+    };
+  });
+
+  $tree.jstree({
+    core: {
+      data: treeData,
+      check_callback: true,  // allow drag/drop, create, rename
+      themes: {
+        name: 'default',
+        dots: true,
+        icons: false,
+        stripes: false,
+        variant: 'small',
+        responsive: true
+      },
+      multiple: false
+    },
+    plugins: ['dnd', 'contextmenu', 'search', 'types'],
+    types: {
+      folder: { icon: false },  // we use our own HTML icons
+      script: { icon: false }
+    },
+    dnd: {
+      always_copy: false,
+      inside_pos: 'last',
+      is_draggable: function(nodes) {
+        // Folders are not draggable in flat mode
+        return nodes.every(n => n.type === 'script');
+      }
+    },
+    contextmenu: {
+      items: function(node) {
+        return buildContextMenu(node);
+      }
+    },
+    search: {
+      case_sensitive: false,
+      show_only_matches: true,
+      show_only_matches_children: true
+    }
+  });
+
+  jsTreeInstance = $tree.jstree(true);
+
+  // Event: open node = folder selected (optional visual feedback)
+  $tree.off('select_node.jstree move_node.jstree rename_node.jstree create_node.jstree');
+  $tree.on('select_node.jstree', function(e, data) {
+    // Single-click on a folder → toggle open/closed (not select).
+    if (data.node.type === 'folder') {
+      const isOpen = data.node.state.opened;
+      if (isOpen) {
+        jsTreeInstance.close_node(data.node);
+      } else {
+        // JSTree quirk: open_node() does nothing for nodes whose children
+        // were stripped during close. Re-inject from cached data, then open.
+        const folderName = data.node.li_attr['data-folder'];
+        const folderScripts = allScripts
+          .filter(s => s.folder === folderName)
+          .sort((a, b) => (a.position || 0) - (b.position || 0) || a.title.localeCompare(b.title));
+        if (folderScripts.length > 0) {
+          const childNodes = folderScripts.map(s => ({
+            id: `script:${s.id}`,
+            text: buildScriptNodeText(s),
+            type: 'script',
+            li_attr: { 'data-script-id': s.id, 'data-folder': folderName },
+            state: { selected: activeScript?.id === s.id }
+          }));
+          data.node.children = childNodes;
+          data.node.children_d = childNodes;
+        }
+        jsTreeInstance.open_node(data.node);
+        // Force state.opened = true (in case open_node was a no-op)
+        data.node.state.opened = true;
+      }
+      // Persist (delayed to let JSTree finish internal state updates)
+      setTimeout(() => {
+        persistTreeState();
+        updateFolderIcon(data.node);
+        jsTreeInstance.deselect_all(true);
+      }, 50);
+      return;
+    }
+    // Single-click on a script → open editor
+    if (data.node.type === 'script') {
+      const sid = data.node.li_attr['data-script-id'];
+      if (sid) selectScript(sid);
+    }
+  });
+
+  // Update folder icons when open/close changes
+  $tree.on('after_open.jstree after_close.jstree', function(e, data) {
+    updateFolderIcon(data.node);
+    persistTreeState();
+  });
+
+  // Event: drop (move script between folders OR reorder within folder)
+  $tree.on('move_node.jstree', function(e, data) {
+    handleNodeMove(data);
+  });
+
+  // Event: rename (folder or script)
+  $tree.on('rename_node.jstree', function(e, data) {
+    if (data.node.type === 'folder') {
+      // Folder rename — handled by edit context menu (inline DBL-click)
+    } else if (data.node.type === 'script') {
+      handleScriptRename(data);
+    }
+  });
+
+  // Event: create (new folder via context menu or button)
+  $tree.on('create_node.jstree', function(e, data) {
+    // Already handled by caller — data.node already has the right text.
+    // We just need to create a placeholder script/folder entry if needed.
+    if (data.node && data.node.type === 'folder') {
+      // New empty folder created. No DB action needed — folder exists in tree.
+    }
+  });
 }
 
-function getVideoTitle(videoId) {
-  // We don't have videos loaded here, so just show the ID
-  return videoId ? `Video #${videoId.substring(0, 8)}…` : '';
+function buildScriptNodeText(s) {
+  const statusIcon = {
+    'draft': '⚪',
+    'in-review': '🟡',
+    'final': '🟢',
+    'archived': '📦'
+  }[s.status] || '⚪';
+
+  const linkBadge = s.video_id ? '<span class="tree-link-badge" title="Mit Video verlinkt">🎬</span>' : '';
+  const isArchived = s.status === 'archived' ? ' tree-script-archived' : '';
+  return `<span class="tree-script-label${isArchived}">${statusIcon} ${escapeHtml(s.title || 'Unbenannt')}</span>${linkBadge}`;
 }
 
+function updateFolderIcon(node) {
+  if (!node || node.type !== 'folder') return;
+  const folderName = node.li_attr['data-folder'];
+  const isOpen = jsTreeInstance && jsTreeInstance.is_open(node);
+  const icon = isOpen ? '📂' : '📁';
+  // Update DOM directly (JSTree stores text as HTML, but we can rewrite it)
+  const $li = jsTreeInstance.element.find(`li[data-folder="${folderName}"]`);
+  $li.find('.tree-folder-icon').text(icon);
+  // Persist via node state so it survives re-render
+  node.li_attr = node.li_attr || {};
+  node.li_attr['data-folder-icon-state'] = isOpen ? 'open' : 'closed';
+}
+
+// ─── Context Menu ──────────────────────────────────────────────────────────
+function buildContextMenu(node) {
+  if (node.type === 'folder') {
+    const folder = node.li_attr['data-folder'];
+    const isArchiv = folder === ARCHIV_FOLDER;
+    return {
+      'newScript': {
+        label: '📄 Neues Skript hier',
+        action: function() { createNewScriptInFolder(folder); }
+      },
+      'newFolder': {
+        label: '📁 Neuen Unterfolder…',
+        _disabled: true,  // flat mode: no subfolders
+        action: function() {}
+      },
+      'rename': {
+        label: '✏️ Umbenennen',
+        _disabled: isArchiv,  // system folders
+        action: function() { jsTreeInstance.edit(node); }
+      },
+      'delete': {
+        label: '🗑️ Folder löschen',
+        _disabled: DEFAULT_FOLDERS.includes(folder) && folder !== ARCHIV_FOLDER,  // protect default folders except Archiv
+        separator_after: true,
+        action: function() { deleteFolder(folder); }
+      }
+    };
+  } else if (node.type === 'script') {
+    const sid = node.li_attr['data-script-id'];
+    const script = allScripts.find(s => s.id === sid);
+    return {
+      'open': {
+        label: '📝 Öffnen',
+        action: function() { selectScript(sid); }
+      },
+      'duplicate': {
+        label: '📋 Duplizieren',
+        action: function() { duplicateScript(sid); }
+      },
+      'archive': {
+        label: script?.status === 'archived' ? '📦 Wiederherstellen' : '📦 Archivieren',
+        action: function() { toggleArchiveScript(sid); }
+      },
+      'delete': {
+        label: '🗑️ Löschen',
+        separator_before: true,
+        action: function() { deleteScriptById(sid); }
+      }
+    };
+  }
+  return {};
+}
+
+// ─── Drag&Drop Handlers ────────────────────────────────────────────────────
+async function handleNodeMove(data) {
+  const scriptId = data.node.li_attr['data-script-id'];
+  if (!scriptId) return;
+  const newParentId = data.parent;  // e.g. "folder:scripts"
+  const newFolder = newParentId?.startsWith('folder:') ? newParentId.slice(7) : null;
+  const newPosition = data.position;  // 0-based index in new parent
+
+  if (!newFolder) return;  // dropped on root, ignore
+
+  try {
+    // Persist folder + position
+    const res = await fetch(`${API}/scripts/${scriptId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folder: newFolder, position: newPosition })
+    });
+    if (!res.ok) throw new Error('Move fehlgeschlagen');
+
+    // Update local cache
+    const script = allScripts.find(s => s.id === scriptId);
+    if (script) {
+      script.folder = newFolder;
+      script.position = newPosition;
+    }
+
+    // If dragged into Archiv folder, ensure status is archived
+    if (newFolder === ARCHIV_FOLDER && script && script.status !== 'archived') {
+      await fetch(`${API}/scripts/${scriptId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'archived' })
+      });
+      script.status = 'archived';
+    }
+
+    // If dragged OUT of Archiv, restore to draft
+    if (newFolder !== ARCHIV_FOLDER && script && script.status === 'archived') {
+      await fetch(`${API}/scripts/${scriptId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'draft' })
+      });
+      script.status = 'draft';
+    }
+
+    // Refresh tree to update status icons + counts
+    refreshTree();
+    updateScriptCount();
+    showToast(`→ ${newFolder}`);
+  } catch (e) {
+    console.error('Move error:', e);
+    showToast('❌ Move fehlgeschlagen', true);
+    refreshTree();  // revert
+  }
+}
+
+async function handleScriptRename(data) {
+  const scriptId = data.node.li_attr['data-script-id'];
+  const newText = data.text;
+  if (!scriptId || !newText) return;
+  try {
+    await fetch(`${API}/scripts/${scriptId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: newText })
+    });
+    const script = allScripts.find(s => s.id === scriptId);
+    if (script) {
+      script.title = newText;
+      if (activeScript?.id === scriptId) {
+        activeScript.title = newText;
+        renderEditor();
+      }
+    }
+  } catch (e) {
+    console.error('Rename error:', e);
+    showToast('❌ Rename fehlgeschlagen', true);
+    refreshTree();
+  }
+}
+
+// ─── Folder Operations ─────────────────────────────────────────────────────
+async function deleteFolder(folder) {
+  if (DEFAULT_FOLDERS.includes(folder) && folder !== ARCHIV_FOLDER) {
+    showToast('❌ Default-Folder kann nicht gelöscht werden', true);
+    return;
+  }
+  const count = allScripts.filter(s => s.folder === folder).length;
+  if (count > 0) {
+    const ok = confirm(`Folder „${folder}" enthält ${count} Skript(e).\n\nWohin damit?\n\nOK = Verschieben nach „scripts" & Folder löschen`);
+    if (!ok) return;
+    // Move all to 'scripts'
+    for (const s of allScripts.filter(s => s.folder === folder)) {
+      await fetch(`${API}/scripts/${s.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder: 'scripts' })
+      });
+    }
+  } else {
+    if (!confirm(`Folder „${folder}" wirklich löschen?`)) return;
+  }
+
+  // Remove folder from tree
+  const node = jsTreeInstance.get_node(`folder:${folder}`);
+  if (node) jsTreeInstance.delete_node(node);
+  showToast(`📁 „${folder}" gelöscht`);
+  await loadScripts();  // reload to sync
+}
+
+async function createNewFolderInline() {
+  const name = prompt('Name des neuen Folders:');
+  if (!name || !name.trim()) return;
+  const trimmed = name.trim();
+
+  if (DEFAULT_FOLDERS.includes(trimmed) || allScripts.some(s => s.folder === trimmed)) {
+    showToast(`❌ Folder „${trimmed}" existiert bereits`, true);
+    return;
+  }
+
+  // Add to tree as new root folder (empty)
+  jsTreeInstance.create_node('#', {
+    id: `folder:${trimmed}`,
+    text: `<span class="tree-folder-label">${escapeHtml(trimmed)}</span><span class="tree-folder-count">0</span>`,
+    type: 'folder',
+    li_attr: { 'data-folder': trimmed },
+    state: { opened: true }
+  });
+  showToast(`📁 Folder „${trimmed}" angelegt`);
+}
+
+// ─── Script Operations ─────────────────────────────────────────────────────
+function getCurrentFolderFromTree() {
+  // If a script is selected, use its folder; otherwise the first opened folder
+  if (activeScript?.folder) return activeScript.folder;
+  // Try to find first selected folder in tree
+  const selected = jsTreeInstance?.get_selected(true);
+  if (selected?.length > 0) {
+    const node = selected[0];
+    if (node.type === 'folder') return node.li_attr['data-folder'];
+    if (node.type === 'script') {
+      const parent = jsTreeInstance.get_node(node.parent);
+      if (parent) return parent.li_attr['data-folder'];
+    }
+  }
+  return 'scripts';  // safe fallback
+}
+
+async function createNewScriptInFolder(folder) {
+  if (folder === ARCHIV_FOLDER) {
+    showToast('❌ Im Archiv-Folder kann kein neues Skript angelegt werden', true);
+    return;
+  }
+  try {
+    const res = await fetch(`${API}/scripts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Neues Skript',
+        slug: 'script-' + Date.now(),
+        folder: folder,
+        status: 'draft',
+        content: '',
+        video_id: null,
+        video_format: 'longform',
+        tags: [],
+        position: 0
+      })
+    });
+    if (!res.ok) throw new Error('Fehler');
+    const newScript = await res.json();
+    allScripts.unshift(newScript);
+    activeScript = newScript;
+    refreshTree();
+    updateScriptCount();
+    renderEditor();
+    showToast(`📄 Neues Skript in „${folder}"`);
+  } catch (err) {
+    console.error(err);
+    showToast('❌ ' + err.message, true);
+  }
+}
+
+async function duplicateScript(scriptId) {
+  const original = allScripts.find(s => s.id === scriptId);
+  if (!original) return;
+  try {
+    const res = await fetch(`${API}/scripts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: original.title + ' (Kopie)',
+        slug: (original.slug || 'script') + '-kopie-' + Date.now(),
+        folder: original.folder,
+        status: 'draft',
+        content: original.content,
+        video_id: original.video_id,
+        video_format: original.video_format,
+        tags: original.tags || [],
+        position: 0
+      })
+    });
+    if (!res.ok) throw new Error('Fehler');
+    await loadScripts();
+    showToast('📋 Skript dupliziert');
+  } catch (e) {
+    console.error(e);
+    showToast('❌ ' + e.message, true);
+  }
+}
+
+async function toggleArchiveScript(scriptId) {
+  const script = allScripts.find(s => s.id === scriptId);
+  if (!script) return;
+
+  if (script.status === 'archived') {
+    // Restore: move out of Archiv + set status to draft
+    if (!confirm(`📦 „${script.title}" wiederherstellen?\n\nEs wird nach „scripts" verschoben.`)) return;
+    try {
+      await fetch(`${API}/scripts/${scriptId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'draft', folder: 'scripts' })
+      });
+      script.status = 'draft';
+      script.folder = 'scripts';
+      showToast('📦 Wiederhergestellt');
+    } catch (e) {
+      console.error(e);
+      showToast('❌ ' + e.message, true);
+      return;
+    }
+  } else {
+    if (!confirm(`📦 „${script.title}" archivieren?\n\nEs wird in den Archiv-Folder verschoben.`)) return;
+    try {
+      await fetch(`${API}/scripts/${scriptId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'archived', folder: 'Archiv' })
+      });
+      script.status = 'archived';
+      script.folder = 'Archiv';
+      showToast('📦 Archiviert');
+    } catch (e) {
+      console.error(e);
+      showToast('❌ ' + e.message, true);
+      return;
+    }
+  }
+  await loadScripts();
+}
+
+async function deleteScriptById(scriptId) {
+  const script = allScripts.find(s => s.id === scriptId);
+  if (!script) return;
+  if (!confirm(`🗑️ Skript „${script.title}" wirklich löschen?\n\nDas ist nicht widerrufbar!`)) return;
+  try {
+    const res = await fetch(`${API}/scripts/${scriptId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Löschen fehlgeschlagen');
+    allScripts = allScripts.filter(s => s.id !== scriptId);
+    if (activeScript?.id === scriptId) {
+      activeScript = null;
+      renderEditor();
+    }
+    refreshTree();
+    updateScriptCount();
+    showToast('🗑️ Gelöscht');
+  } catch (e) {
+    console.error(e);
+    showToast('❌ ' + e.message, true);
+  }
+}
+
+// ─── Tree State Persistence ────────────────────────────────────────────────
+function persistTreeState() {
+  if (!jsTreeInstance) return;
+  const state = {};
+  jsTreeInstance.get_json('#', { flat: true }).forEach(n => {
+    if (n.type === 'folder') {
+      state[n.li_attr['data-folder']] = n.state.opened;
+    }
+  });
+  try { localStorage.setItem(TREE_STATE_KEY, JSON.stringify(state)); } catch (e) {}
+}
+
+function restoreTreeState() {
+  if (!jsTreeInstance) return;
+  let state = {};
+  try { state = JSON.parse(localStorage.getItem(TREE_STATE_KEY) || '{}'); } catch (e) {}
+
+  const hasState = Object.keys(state).length > 0;
+
+  if (!hasState) {
+    // First-time init (or cleared localStorage): close Archiv only
+    const archivNode = jsTreeInstance.get_node(`folder:${ARCHIV_FOLDER}`);
+    if (archivNode && archivNode.state.opened) {
+      jsTreeInstance.close_node(archivNode);
+    }
+    return;
+  }
+
+  // Apply stored state: open/close per folder
+  Object.keys(state).forEach(folder => {
+    const node = jsTreeInstance.get_node(`folder:${folder}`);
+    if (node) {
+      if (state[folder] && !node.state.opened) {
+        jsTreeInstance.open_node(node);
+      } else if (!state[folder] && node.state.opened) {
+        jsTreeInstance.close_node(node);
+      }
+    }
+  });
+}
+
+// ─── Search ────────────────────────────────────────────────────────────────
+function setupHeaderButtons() {
+  const $input = $('#scriptSearchInput');
+  if (!$input.length) return;
+
+  // Debounced search
+  let searchTimer;
+  $input.on('input', function() {
+    clearTimeout(searchTimer);
+    const v = $(this).val();
+    searchTimer = setTimeout(() => {
+      if (jsTreeInstance) jsTreeInstance.search(v);
+      try { localStorage.setItem(TREE_SEARCH_KEY, v); } catch (e) {}
+    }, 200);
+  });
+
+  $('#btnNewScript').on('click', function() {
+    createNewScriptInFolder(getCurrentFolderFromTree());
+  });
+
+  $('#btnNewFolder').on('click', function() {
+    createNewFolderInline();
+  });
+}
+
+function restoreLastSearch() {
+  let v = '';
+  try { v = localStorage.getItem(TREE_SEARCH_KEY) || ''; } catch (e) {}
+  if (v) {
+    $('#scriptSearchInput').val(v);
+    if (jsTreeInstance) jsTreeInstance.search(v);
+  }
+}
+
+// ─── Tree Refresh ──────────────────────────────────────────────────────────
+function refreshTree() {
+  if (!jsTreeInstance) return;
+  buildJsTree();
+  // Re-apply current search filter
+  const searchVal = $('#scriptSearchInput')?.val();
+  if (searchVal) jsTreeInstance.search(searchVal);
+}
+
+function updateScriptCount() {
+  const el = document.getElementById('scriptCount');
+  if (el) el.textContent = `${allScripts.length} Skript${allScripts.length === 1 ? '' : 'e'}`;
+}
+
+// ─── Editor Render (unchanged from before) ─────────────────────────────────
 function renderEmptyState() {
   return `
     <div class="scripts-empty-state">
       <h3>Kein Skript ausgewählt</h3>
-      <p>Wähle ein Skript aus der Liste oder erstelle ein neues, um mit dem Schreiben zu beginnen.</p>
-      <button onclick="createNewScript()">+ Neues Skript erstellen</button>
+      <p>Wähle ein Skript aus dem Tree oder erstelle ein neues, um mit dem Schreiben zu beginnen.</p>
+      <button onclick="createNewScriptInFolder(getCurrentFolderFromTree())">+ Neues Skript erstellen</button>
     </div>
   `;
 }
 
 function renderEditor() {
+  const panel = document.getElementById('scriptsEditorPanel');
+  if (!panel) return;
+  if (!activeScript) {
+    panel.innerHTML = renderEmptyState();
+    return;
+  }
+  panel.innerHTML = renderEditorHTML();
+  setupEditorEvents();
+}
+
+function renderEditorHTML() {
   const s = activeScript;
   return `
     <div class="scripts-editor-header">
@@ -165,8 +777,6 @@ function printActiveScript() {
   const date = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
   const wordCount = countWords(activeScript.content || '');
 
-  // Build print document in a hidden iframe — avoids popup blockers (Vivaldi!)
-  // and preserves the user-gesture chain for window.print() inside the iframe.
   let iframe = document.getElementById('printIframe');
   if (!iframe) {
     iframe = document.createElement('iframe');
@@ -229,43 +839,67 @@ function printActiveScript() {
   doc.close();
 }
 
-// ─── Markdown ──────────────────────────────────────────────────────────────
+// ─── Markdown Helpers ──────────────────────────────────────────────────────
 function escapeHtml(str) {
-  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function renderPreview(md) {
   if (!md) return '<p style="color:#a0999f;font-style:italic;">Live-Vorschau erscheint hier…</p>';
 
-  // Simple markdown to HTML (avoid heavy deps)
-  let html = md
-    // Code blocks first (before other processing)
-    .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
-    // Headings
-    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-    // Bold + Italic
-    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    // Links
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
-    // Unordered lists
-    .replace(/^- (.+)$/gm, '<li>$1</li>')
-    .replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
-    // Blockquotes
-    .replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>')
-    // Paragraphs
-    .replace(/\n\n/g, '</p><p>')
-    .replace(/\n/g, '<br>');
+  // Cap input size to prevent catastrophic backtracking / stack overflow
+  // (e.g. very long scripts with many code blocks)
+  const MAX = 50000;
+  const input = md.length > MAX ? md.slice(0, MAX) + '\n\n[… Inhalt gekürzt für Vorschau …]' : md;
 
-  return `<p>${html}</p>`;
+  // Use a non-backtracking approach: split on code fences first
+  const parts = input.split(/```/);
+  const out = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 2 === 1) {
+      // Inside code fence
+      out.push('<pre><code>' + escapeHtml(parts[i]) + '</code></pre>');
+    } else {
+      // Outside code fence — apply other transforms
+      let h = parts[i]
+        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+        .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*([^*\n]+)\*/g, '<em>$1</em>')
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
+        .replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+
+      // Process line by line for lists (avoid giant single-line regex)
+      const lines = h.split('\n');
+      const processed = [];
+      let inList = false;
+      for (const line of lines) {
+        if (/^- .+/.test(line)) {
+          if (!inList) { processed.push('<ul>'); inList = true; }
+          processed.push(line.replace(/^- (.+)$/, '<li>$1</li>'));
+        } else {
+          if (inList) { processed.push('</ul>'); inList = false; }
+          processed.push(line);
+        }
+      }
+      if (inList) processed.push('</ul>');
+
+      h = processed.join('\n')
+        .replace(/\n\n/g, '</p><p>')
+        .replace(/\n/g, '<br>');
+
+      out.push(h);
+    }
+  }
+
+  return `<p>${out.join('')}</p>`;
 }
 
 function countWords(text) {
   if (!text) return 0;
-  return text.trim().split(/\s+/).filter(w => w.length > 0).length;
+  return String(text).trim().split(/\s+/).filter(w => w.length > 0).length;
 }
 
 // ─── Editor Events ─────────────────────────────────────────────────────────
@@ -273,7 +907,6 @@ function setupEditorEvents() {
   const textarea = document.getElementById('scriptTextarea');
   if (!textarea) return;
 
-  // Load videos for dropdown (already in window._allVideos from initScripts)
   const select = document.getElementById('videoLinkSelect');
   if (select) {
     if (window._allVideos && window._allVideos.length > 0) {
@@ -283,6 +916,12 @@ function setupEditorEvents() {
     if (activeScript?.video_id) {
       select.value = activeScript.video_id;
     }
+  }
+
+  // Persist tree state on any tree change
+  if (jsTreeInstance) {
+    jsTreeInstance.element.off('after_open.jstree persist', persistTreeState);
+    jsTreeInstance.element.on('after_open.jstree after_close.jstree', persistTreeState);
   }
 }
 
@@ -320,7 +959,7 @@ function scheduleAutoSave() {
   if (autoSaveTimer) clearTimeout(autoSaveTimer);
   autoSaveTimer = setTimeout(() => {
     if (isDirty) saveScript(true);
-  }, 30000); // 30s auto-save
+  }, 30000);
 }
 
 function insertMd(before, after) {
@@ -337,7 +976,6 @@ function insertMd(before, after) {
   textarea.dispatchEvent(new Event('input'));
 }
 
-// ─── CRUD ──────────────────────────────────────────────────────────────────
 function insertCode() {
   const textarea = document.getElementById('scriptTextarea');
   if (!textarea) return;
@@ -351,83 +989,39 @@ function insertCode() {
   textarea.dispatchEvent(new Event('input'));
 }
 
+// ─── CRUD Wrappers (legacy, called by editor buttons) ──────────────────────
 async function selectScript(id) {
   if (isDirty && activeScript) {
     await saveScript(true);
   }
   activeScript = allScripts.find(s => s.id === id) || null;
-  renderScriptsView();
+  // JSTree visually syncs via state.selected in the tree data.
+  // We do NOT call jsTreeInstance.select_node() here — it would re-fire
+  // the select_node event and create an infinite loop.
+  renderEditor();
 }
 
 async function createNewScript() {
-  const title = 'Neues Skript';
-  try {
-    const res = await fetch(`${API}/scripts`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title,
-        slug: 'script-' + Date.now(),
-        folder: 'scripts',
-        status: 'draft',
-        content: '',
-        video_id: null,
-        video_format: 'longform',
-        tags: [],
-        position: 0
-      })
-    });
-    if (!res.ok) throw new Error('Fehler');
-    const newScript = await res.json();
-    allScripts.unshift(newScript);
-    activeScript = newScript;
-    renderScriptsView();
-  } catch (err) {
-    console.error(err);
-  }
+  // Backward-compat: called by empty-state button
+  return createNewScriptInFolder(getCurrentFolderFromTree());
 }
 
 async function archiveScript() {
   if (!activeScript) return;
-  const ok = confirm(`📦 Skript „${activeScript.title}“ archivieren?\n\nArchivierte Skripte bleiben erhalten, werden aber in der Hauptansicht ausgeblendet. Du kannst sie über die Archiv-Ansicht wiederherstellen.`);
-  if (!ok) return;
-  try {
-    const res = await fetch(`${API}/scripts/${activeScript.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...activeScript, status: 'archived' })
-    });
-    if (!res.ok) throw new Error('Archivieren fehlgeschlagen');
-    const updated = await res.json();
-    const idx = allScripts.findIndex(s => s.id === activeScript.id);
-    if (idx >= 0) allScripts[idx] = updated;
-    activeScript = updated;
-    renderScriptsView();
-    showToast('Skript archiviert');
-  } catch (e) {
-    alert('Fehler beim Archivieren: ' + e.message);
-  }
+  return toggleArchiveScript(activeScript.id);
 }
 
 async function deleteScript() {
   if (!activeScript) return;
-  const ok = confirm(`🗑️ Skript „${activeScript.title}“ wirklich löschen?\n\nDas ist nicht widerrufbar!`);
-  if (!ok) return;
-  try {
-    const res = await fetch(`${API}/scripts/${activeScript.id}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error('Löschen fehlgeschlagen');
-    allScripts = allScripts.filter(s => s.id !== activeScript.id);
-    activeScript = null;
-    renderScriptsView();
-    showToast('Skript gelöscht');
-  } catch (e) {
-    alert('Fehler beim Löschen: ' + e.message);
-  }
+  return deleteScriptById(activeScript.id);
 }
 
-function showToast(message) {
+function showToast(message, isError = false) {
+  // Remove existing
+  document.querySelectorAll('.scripts-toast').forEach(t => t.remove());
+
   const toast = document.createElement('div');
-  toast.className = 'scripts-toast';
+  toast.className = 'scripts-toast' + (isError ? ' scripts-toast--error' : '');
   toast.textContent = message;
   document.body.appendChild(toast);
   setTimeout(() => toast.classList.add('scripts-toast--show'), 10);
@@ -444,6 +1038,11 @@ async function saveScript(silent = false) {
   const content = textarea ? textarea.value : '';
   const title = titleInput ? titleInput.value : activeScript.title;
 
+  // Capture pre-save state so we can decide what to update in the tree
+  const oldFolder = activeScript.folder;
+  const oldStatus = activeScript.status;
+  const oldTitle = activeScript.title;
+
   try {
     const res = await fetch(`${API}/scripts/${activeScript.id}`, {
       method: 'PUT',
@@ -451,10 +1050,12 @@ async function saveScript(silent = false) {
       body: JSON.stringify({ ...activeScript, title, content })
     });
     if (!res.ok) throw new Error('Speichern fehlgeschlagen');
-    const updated = await res.json();
-    const idx = allScripts.findIndex(s => s.id === updated.id);
-    if (idx !== -1) allScripts[idx] = updated;
-    activeScript = updated;
+    const idx = allScripts.findIndex(s => s.id === activeScript.id);
+    if (idx !== -1) {
+      activeScript.title = title;
+      activeScript.content = content;
+      allScripts[idx] = activeScript;
+    }
     isDirty = false;
     if (!silent) {
       const status = document.getElementById('saveStatus');
@@ -463,9 +1064,37 @@ async function saveScript(silent = false) {
       const status = document.getElementById('saveStatus');
       if (status) status.textContent = '✓ auto-gespeichert';
     }
+    // In-place tree update (no full rebuild = no cursor jump).
+    // Only redraw the affected node; rebuild only if folder/status changed.
+    if (oldFolder !== activeScript.folder || oldStatus !== activeScript.status) {
+      // Structural change → rebuild required (folder/status drive tree layout)
+      refreshTree();
+    } else {
+      // Text-only change → update just this node's label
+      updateScriptNodeLabel(activeScript);
+    }
   } catch (err) {
     console.error(err);
     if (!silent) alert('Fehler beim Speichern: ' + err.message);
+  }
+}
+
+// Update a single script node's label without rebuilding the tree.
+// Prevents cursor jump in the editor during auto-save.
+function updateScriptNodeLabel(script) {
+  if (!jsTreeInstance || !script) return;
+  const nodeId = `script:${script.id}`;
+  const node = jsTreeInstance.get_node(nodeId);
+  if (!node) return;
+  // Update JSTree's internal text + DOM in one go. redraw_node('full') would
+  // destroy and recreate the <a>, which is the cursor-jump culprit.
+  const newText = buildScriptNodeText(script);
+  node.text = newText;
+  // Find the rendered <a class="jstree-anchor"> and update its innerHTML
+  // without touching any sibling elements (which is where the cursor lives).
+  const $anchor = jsTreeInstance.element.find(`li[data-script-id="${script.id}"] > .jstree-anchor`);
+  if ($anchor.length) {
+    $anchor[0].innerHTML = newText;
   }
 }
 
@@ -478,14 +1107,15 @@ async function linkScriptToVideo(videoId) {
       body: JSON.stringify({ video_id: videoId || null })
     });
     if (!res.ok) throw new Error('Fehler');
-    const updated = await res.json();
-    activeScript = updated;
-    const idx = allScripts.findIndex(s => s.id === updated.id);
-    if (idx !== -1) allScripts[idx] = updated;
-    renderScriptsView();
+    activeScript.video_id = videoId || null;
+    refreshTree();
   } catch (err) {
     console.error(err);
   }
+}
+
+function getVideoTitle(videoId) {
+  return videoId ? `Video #${videoId.substring(0, 8)}…` : '';
 }
 
 // ─── Sidebar nav integration ────────────────────────────────────────────────
@@ -506,7 +1136,3 @@ function setupScriptsNav() {
     });
   });
 }
-
-// Note: scripts.js does NOT auto-init on DOMContentLoaded anymore.
-// initScripts() is called by app.js setupNav() when scripts view is activated.
-// This avoids double-initialization (loadScripts called twice on first load).

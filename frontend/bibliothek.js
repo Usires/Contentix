@@ -165,7 +165,7 @@ function makeHero(v, allVideos) {
     : '';
   
   const thumbHtml = v.thumbnail_url
-    ? `<img src="${v.thumbnail_url}" alt="" onerror="this.parentElement.classList.add('lib-hero-thumb-fallback'); this.remove(); this.parentElement.insertAdjacentHTML('beforeend', '🎬');">`
+    ? `<img src="${v.thumbnail_url}" alt="" onerror="this.parentElement.classList.remove('has-image'); this.parentElement.classList.add('lib-hero-thumb-fallback'); this.remove();">`
     : '🎬';
   
   return {
