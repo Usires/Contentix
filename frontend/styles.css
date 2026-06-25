@@ -2902,12 +2902,19 @@ kbd {
 }
 
 .lib-cards {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  display: flex;
+  /* Always 2 rows of 3 cards. Flex layout lets us make every card in
+     a row the same height via align-items: stretch (default), which
+     stretches cards to match the tallest sibling in the row.
+     (Grid with grid-auto-rows: 1fr would only work with an explicit
+     container height — flex sidesteps that constraint.) */
+  flex-wrap: wrap;
   gap: 14px;
 }
 
 .lib-card {
+  /* 3 cards per row, accounting for the 14px gap. */
+  flex: 0 0 calc((100% - 28px) / 3);
   background: var(--bg-card, #fff);
   border: 1px solid var(--border-subtle, #e5e7eb);
   border-radius: 12px;

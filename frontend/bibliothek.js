@@ -256,16 +256,46 @@ function renderBibliothek(videos) {
       ? newest.map(v => makeCard(v, videos)).join('')
       : '<div class="bibliothek-empty">Keine Videos mit Datum</div>';
   }
-  
+
   if (topList) {
     topList.innerHTML = top.length > 0
       ? top.map(v => makeCard(v, videos)).join('')
       : '<div class="bibliothek-empty">Keine Videos</div>';
   }
-  
+
+  // Equalize card heights within each grid so cards with short hook
+  // statements don't look 'squished' next to cards with long ones.
+  // Pure CSS can't enforce equal heights across mixed-content grids
+  // without an explicit container size (1fr needs a parent height to
+  // distribute), so we do it in JS after render. Runs in a microtask
+  // so the DOM has laid out before we measure.
+  requestAnimationFrame(() => equalizeGridHeights(newestList, topList));
+
   // Footer: Total count
   const totalEl = document.getElementById('libTotalCount');
   if (totalEl) totalEl.textContent = videos.length;
+}
+
+// Make every card in a grid the same height as the tallest card in the
+// same grid. Without this, cards with short hook statements (e.g. 'stat'
+// or 'perf' layers) render smaller than cards with 'nix' hooks, and the
+// grid looks ragged. We measure after layout so we see the rendered
+// intrinsic heights, not just text-wrap estimates.
+function equalizeGridHeights(...grids) {
+  for (const grid of grids) {
+    if (!grid) continue;
+    const cards = grid.querySelectorAll('.lib-card');
+    if (cards.length === 0) continue;
+    let max = 0;
+    cards.forEach(c => {
+      c.style.minHeight = '';  // reset before measuring
+      const h = c.getBoundingClientRect().height;
+      if (h > max) max = h;
+    });
+    if (max > 0) {
+      cards.forEach(c => { c.style.minHeight = max + 'px'; });
+    }
+  }
 }
 
 // Initialisiere beim View-Wechsel

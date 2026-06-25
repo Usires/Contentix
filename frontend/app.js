@@ -19,6 +19,11 @@ document.addEventListener('DOMContentLoaded', () => {
   restoreView();
   restoreTheme();
   updateNextVideo();
+  // Pre-load history so the sidebar badge shows the real count instead
+  // of '0' on initial page load. initHistory() fetches /api/history and
+  // populates allHistoryVideos + updates the badge — running it here
+  // means the count is correct before the user clicks History.
+  if (typeof initHistory === 'function') initHistory();
   // Re-check urgency every minute
   setInterval(updateNextVideo, 60000);
   loadChannelStats();
