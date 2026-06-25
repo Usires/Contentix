@@ -84,6 +84,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`tests/sort-comparator.test.js`). Playwright bleibt für Browser-Tests.
   Keine neuen devDependencies — `node:test` ist seit Node 18 stabil.
 
+### Added (Phase 3 — 2026-06-25)
+- **🎬 Video actions in store**: `loadVideos`, `createVideo`,
+  `updateVideo`, `deleteVideo` — full async action set mirroring the
+  script actions. Same optimistic + rollback pattern, same cancellation
+  for rapid successive loads. 10 new unit tests (30/30 store tests
+  total now).
+
+### Removed (Phase 3 — 2026-06-25)
+- **💀 Legacy store API deleted** (`getAllCards`, `loadAllCards`,
+  `setAllCards`, `onAllCardsChange`). All consumers migrated to
+  `store.select(s => s.videos)` / `store.actions.loadVideos()` etc.
+  The legacy stub was the pre-Phase-1 mini-store; it's gone now.
+
+### Changed (Phase 3 — 2026-06-25)
+- **🎯 kanban.js migrated to store**: All direct fetches replaced with
+  `store.actions.{loadVideos, updateVideo, deleteVideo, createVideo}`.
+  Subscribe-with-hash pattern fires `renderBoard()` on videos data
+  changes. Drop handler, archive, delete, duplicate, modal save — all
+  route through the store.
+- **📅 calendar.js migrated to store**: All 12 `loadAllCards()` /
+  `getAllCards()` call sites converted. Direct fetch in
+  `handleDayColDrop` replaced with `store.actions.updateVideo(id,
+  { planned_date })` (optimistic + rollback). Subscribe-with-hash in
+  `ensureCalendarSubscribed()`.
+- **🖥️ app.js migrated to store**: Two call sites in the command
+  palette (renderPaletteResults reads videos from store;
+  openCardFromPalette triggers `store.actions.loadVideos` before
+  opening the modal). history.js was already independent (uses its own
+  `/api/history` endpoint, no migration needed).
+- **📡 DELETE /api/scripts/:id and DELETE /api/videos/:id return full
+  record**: Was `{status:'ok'}` / `{ok: true}`. Now returns the deleted
+  record (with tags parsed from JSON) so the store's rollback path has
+  the snapshot it needs. Same fix as the PUT/POST round-trip fix,
+  applied to delete for symmetry.
+
 ## [0.13.0] — 2026-06-19
 ## [0.12.0] — 2026-06-19
 

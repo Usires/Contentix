@@ -309,6 +309,147 @@ function createStore(initialState) {
      */
     setActiveView(viewName) {
       setState(s => { s.ui.activeView = viewName; });
+    },
+
+    // -------------------------------------------------------------------
+    // Video actions (used by kanban.js, calendar.js, app.js)
+    // -------------------------------------------------------------------
+
+    /**
+     * Fetch all videos (a.k.a. "cards") from the backend. Mirrors
+     * loadScripts in shape and behavior.
+     *
+     * @returns {Promise<Array>}
+     */
+    async loadVideos() {
+      cancelPrevious('loadVideos');
+      const token = { cancelled: false };
+      inflight.set('loadVideos', token);
+      setState(s => { s.meta.loading.videos = true; s.meta.errors.videos = null; });
+      try {
+        const res = await fetch(`${API}/videos`);
+        if (token.cancelled) return [];
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const videos = await res.json();
+        if (token.cancelled) return [];
+        setState(s => { s.videos = videos; });
+        return videos;
+      } catch (err) {
+        if (token.cancelled) return [];
+        console.error('[store] loadVideos failed:', err);
+        setState(s => { s.meta.errors.videos = err.message; });
+        return [];
+      } finally {
+        if (!token.cancelled) {
+          setState(s => { s.meta.loading.videos = false; });
+          inflight.delete('loadVideos');
+        }
+      }
+    },
+
+    /**
+     * Persist edits to an existing video via PATCH /api/videos/:id.
+     * Optimistic + rollback like updateScript.
+     *
+     * @param {string} id
+     * @param {object} patch
+     * @returns {Promise<object>}
+     */
+    async updateVideo(id, patch) {
+      const before = state.videos.find(v => v.id === id);
+      if (!before) throw new Error(`video ${id} not found`);
+      setState(s => {
+        const target = s.videos.find(x => x.id === id);
+        if (target) Object.assign(target, patch);
+      });
+      try {
+        const res = await fetch(`${API}/videos/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const updated = await res.json();
+        setState(s => {
+          const idx = s.videos.findIndex(x => x.id === id);
+          if (idx !== -1) s.videos[idx] = updated;
+        });
+        return updated;
+      } catch (err) {
+        console.error('[store] updateVideo failed:', err);
+        setState(s => {
+          const idx = s.videos.findIndex(x => x.id === id);
+          if (idx !== -1) s.videos[idx] = { ...before };
+          s.meta.errors.videos = err.message;
+        });
+        throw err;
+      }
+    },
+
+    /**
+     * Delete a video by id. Returns the deleted record for rollback.
+     *
+     * @param {string} id
+     * @returns {Promise<object>}
+     */
+    async deleteVideo(id) {
+      const before = state.videos.find(v => v.id === id);
+      if (!before) return null;
+      setState(s => {
+        const idx = s.videos.findIndex(x => x.id === id);
+        if (idx !== -1) s.videos.splice(idx, 1);
+      });
+      try {
+        const res = await fetch(`${API}/videos/${id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json();
+      } catch (err) {
+        console.error('[store] deleteVideo failed:', err);
+        setState(s => {
+          s.videos.push(before);
+          s.meta.errors.videos = err.message;
+        });
+        throw err;
+      }
+    },
+
+    /**
+     * Create a new video via POST /api/videos. Optimistic with rollback.
+     *
+     * @param {object} input
+     * @returns {Promise<object>}
+     */
+    async createVideo(input) {
+      const optimistic = {
+        ...input,
+        id: `optimistic-${crypto.randomUUID()}`,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        __optimistic: true
+      };
+      setState(s => { s.videos.unshift(optimistic); });
+      try {
+        const res = await fetch(`${API}/videos`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(input)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const created = await res.json();
+        setState(s => {
+          const idx = s.videos.findIndex(x => x.id === optimistic.id);
+          if (idx !== -1) s.videos[idx] = { ...created, __optimistic: false };
+        });
+        return created;
+      } catch (err) {
+        console.error('[store] createVideo failed:', err);
+        setState(s => {
+          const idx = s.videos.findIndex(x => x.id === optimistic.id);
+          if (idx !== -1) s.videos.splice(idx, 1);
+          s.meta.errors.videos = err.message;
+        });
+        throw err;
+      }
     }
   };
 
@@ -348,43 +489,6 @@ const DEFAULT_STATE = {
 };
 
 const store = createStore(DEFAULT_STATE);
-
-// -------------------------------------------------------------------------
-// DEPRECATED LEGACY API (kept for backward compatibility)
-//
-// The functions below were the pre-Phase-1 mini-store API. They still
-// exist so app.js / calendar.js / kanban.js (which use them for the
-// videos collection) don't break today. Migration to the new store
-// happens in Phase 3 (per ADR-001 rollout plan).
-//
-// DO NOT ADD NEW CALLERS. Use store.actions / store.select instead.
-// -------------------------------------------------------------------------
-
-let legacyAllCards = [];
-const legacyListeners = [];
-
-function getAllCards() {
-  return legacyAllCards;
-}
-function setAllCards(cards) {
-  legacyAllCards = cards;
-  legacyListeners.forEach(fn => fn(cards));
-}
-async function loadAllCards() {
-  try {
-    const res = await fetch('/api/videos');
-    if (!res.ok) throw new Error('API nicht erreichbar');
-    const cards = await res.json();
-    setAllCards(cards);
-    return cards;
-  } catch (err) {
-    console.error('[store/legacy] loadAllCards failed:', err);
-    return legacyAllCards;
-  }
-}
-function onAllCardsChange(fn) {
-  legacyListeners.push(fn);
-}
 
 // Expose to window for non-module scripts (legacy compat for inline
 // <script> blocks that pre-date ESM). Module-aware consumers should

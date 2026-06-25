@@ -19,7 +19,23 @@ function showToast(message, type = 'info') {
 }
 
 // ─── Init ───────────────────────────────────────────────────────────────────
+let kanbanStoreSubscribed = false;
 document.addEventListener('DOMContentLoaded', () => {
+  if (!kanbanStoreSubscribed) {
+    kanbanStoreSubscribed = true;
+    // Re-render whenever videos data changes. renderBoard() itself
+    // no-ops when #kanbanBoard isn't in the DOM (board not yet created),
+    // so we don't need a visibility check here. Visibility gating is
+    // appropriate for scripts.js (where rendering is expensive) but
+    // kanban's render is cheap and we need it to fire on first reveal.
+    let lastHash = null;
+    store.subscribe((state) => {
+      const hash = JSON.stringify(state.videos);
+      if (hash === lastHash) return;
+      lastHash = hash;
+      renderBoard();
+    });
+  }
   loadCards();
   setupDragAndDrop();
   setupModal();
@@ -27,19 +43,19 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ─── Load Cards from Backend ─────────────────────────────────────────────────
+// Thin wrapper kept for callers (legacy / debug). Prefer store.actions.loadVideos().
 async function loadCards() {
   try {
-    const res = await fetch(`${API}/videos`);
-    if (!res.ok) throw new Error('API nicht erreichbar');
-    const cards = await res.json();
-    setAllCards(cards);
-    renderBoard();
-    return cards;
+    await store.actions.loadVideos();
   } catch (err) {
     console.error('Fehler beim Laden:', err);
     renderBoard(); // Render empty board
-    return [];
   }
+}
+
+// ─── Store-bound selector ───────────────────────────────────────────────────
+function getAllCards() {
+  return store.select(s => s.videos);
 }
 
 // ─── Render Kanban Board ──────────────────────────────────────────────────────
@@ -220,20 +236,14 @@ async function handleDrop(e) {
   };
 
   try {
-    const res = await fetch(`${API}/videos/${cardId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: reverseStatusMap[toColumn] })
-    });
-    if (res.ok) {
-      await loadCards();
-      if (toColumn === 'uploaded' && typeof confettiAtColumn === 'function') {
-        confettiAtColumn('uploaded');
-        setTimeout(() => confettiAtColumn('uploaded'), 350);
-        setTimeout(() => confettiAtColumn('uploaded'), 700);
-      }
-      if (typeof updateNextVideo === 'function') updateNextVideo();
+    await store.actions.updateVideo(cardId, { status: reverseStatusMap[toColumn] });
+    // Subscribe-with-hash will trigger renderBoard automatically.
+    if (toColumn === 'uploaded' && typeof confettiAtColumn === 'function') {
+      confettiAtColumn('uploaded');
+      setTimeout(() => confettiAtColumn('uploaded'), 350);
+      setTimeout(() => confettiAtColumn('uploaded'), 700);
     }
+    if (typeof updateNextVideo === 'function') updateNextVideo();
   } catch (err) {
     showToast('Fehler beim Verschieben: ' + err.message, 'error');
   }
@@ -284,33 +294,19 @@ function setupCardListeners() {
 // ─── Card Actions ───────────────────────────────────────────────────────────
 async function deleteCard(cardId) {
   try {
-    const res = await fetch(`${API}/videos/${cardId}`, { method: 'DELETE' });
-    if (res.ok) {
-      await loadCards();
-      showToast('Karte gelöscht', 'success');
-    } else {
-      showToast('Fehler beim Löschen', 'error');
-    }
+    await store.actions.deleteVideo(cardId);
+    showToast('Karte gelöscht', 'success');
   } catch (err) {
-    showToast('Fehler: ' + err.message, 'error');
+    showToast('Fehler beim Löschen: ' + err.message, 'error');
   }
 }
 
 async function archiveCard(cardId) {
   try {
-    const res = await fetch(`${API}/videos/${cardId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'archived' })
-    });
-    if (res.ok) {
-      await loadCards();
-      showToast('Karte archiviert', 'success');
-    } else {
-      showToast('Fehler beim Archivieren', 'error');
-    }
+    await store.actions.updateVideo(cardId, { status: 'archived' });
+    showToast('Karte archiviert', 'success');
   } catch (err) {
-    showToast('Fehler: ' + err.message, 'error');
+    showToast('Fehler beim Archivieren: ' + err.message, 'error');
   }
 }
 
@@ -430,22 +426,15 @@ async function duplicateCard(cardId) {
   const card = getAllCards().find(c => c.id === cardId);
   if (!card) return;
   try {
-    const res = await fetch(`${API}/videos`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: card.title + ' (Kopie)',
-        status: card.status,
-        planned_date: card.planned_date || null,
-        thumbnail: card.thumbnail || null,
-        notes: card.notes || '',
-        video_format: card.video_format || 'standard'
-      })
+    await store.actions.createVideo({
+      title: card.title + ' (Kopie)',
+      status: card.status,
+      planned_date: card.planned_date || null,
+      thumbnail: card.thumbnail || null,
+      notes: card.notes || '',
+      video_format: card.video_format || 'standard'
     });
-    if (res.ok) {
-      await loadCards();
-      showToast('Karte dupliziert', 'success');
-    }
+    showToast('Karte dupliziert', 'success');
   } catch (err) {
     showToast('Fehler: ' + err.message, 'error');
   }
@@ -546,10 +535,13 @@ async function populateRemakeDropdown(currentCardId) {
   const sel = document.getElementById('remakeLinkSelect');
   if (!sel) return;
   try {
-    // Fetch all videos, filter to originals (parent_video_id is null) + self
-    const res = await fetch(`${API}/videos`);
-    if (!res.ok) return;
-    const all = await res.json();
+    // Read videos from the central store (ADR-001 Phase 3).
+    // If the store is empty, trigger a load first so the dropdown has data.
+    let all = getAllCards();
+    if (all.length === 0) {
+      await store.actions.loadVideos();
+      all = getAllCards();
+    }
     const originals = all.filter(v => !v.parent_video_id || v.id === currentCardId);
 
     // Sort by published_date DESC (published first), then by created_at DESC
@@ -708,23 +700,16 @@ async function handleCardSubmit(e) {
   const submitBtn = form.querySelector('button[type="submit"]');
   const origBtnText = submitBtn ? submitBtn.textContent : '';
   try {
-    const url = id ? `${API}/videos/${id}` : `${API}/videos`;
-    const method = id ? 'PUT' : 'POST';
     if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '💾 Speichern...'; }
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (!res.ok) throw new Error('Speichern fehlgeschlagen');
+    if (id) {
+      await store.actions.updateVideo(id, payload);
+    } else {
+      await store.actions.createVideo(payload);
+    }
     showToast('✓ Gespeichert', 'success');
     closeCardModal();
-    await loadCards();
-    // Refresh calendar if we're in calendar view
-    if (typeof renderCalendarGrid === 'function' && typeof getAllCards === 'function') {
-      const allCards = getAllCards();
-      if (allCards && allCards.length > 0) renderCalendarGrid(allCards);
-    }
+    // Subscribers re-render the board automatically. Calendar also
+    // re-renders because it subscribes to the same store.
     if (typeof updateNextVideo === 'function') updateNextVideo();
   } catch (err) {
     showToast('Fehler: ' + err.message, 'error');

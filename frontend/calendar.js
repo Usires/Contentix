@@ -8,7 +8,28 @@ let currentView = 'month'; // 'month' | 'week'
 let selectedDay = null;
 let weekIndex = 0; // 0 = first week of month, 1 = second week, ...
 
-// Note: allCards is shared from kanban.js (loaded there and set as global)
+// Note: videos are read from the central store (ADR-001 Phase 3).
+// We keep the local `getAllCards()` helper as a thin store.select wrapper.
+function getAllCards() {
+  return store.select(s => s.videos);
+}
+
+// Subscribe to videos data changes. Phase 3 migration: same pattern
+// as scripts.js / kanban.js. Only re-render when the videos hash changes.
+let calendarStoreSubscribed = false;
+function ensureCalendarSubscribed() {
+  if (calendarStoreSubscribed) return;
+  calendarStoreSubscribed = true;
+  let lastHash = null;
+  store.subscribe((state) => {
+    const grid = document.getElementById('calendarGrid');
+    if (!grid) return;
+    const hash = JSON.stringify(state.videos);
+    if (hash === lastHash) return;
+    lastHash = hash;
+    renderCalendarGrid(getAllCards() || []);
+  });
+}
 
 // ─── Init ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -46,9 +67,11 @@ async function renderCalendar() {
   const container = document.getElementById('calendarContent');
   if (!container) return;
 
-  // Load all cards for date filtering
+  // Subscribe once to videos data so the grid re-renders on updates.
+  ensureCalendarSubscribed();
+  // Ensure videos are loaded for date filtering.
   try {
-    await loadAllCards();
+    await store.actions.loadVideos();
   } catch (_) {}
 
   container.innerHTML = `
@@ -352,7 +375,7 @@ async function prevCalendarPeriod() {
     }
   }
   try {
-    await loadAllCards();
+    await store.actions.loadVideos();
     renderCalendarGrid(getAllCards() || []);
   } catch(err) {
     showToast && showToast("Fehler beim Laden", "error");
@@ -377,7 +400,7 @@ async function nextCalendarPeriod() {
       weekIndex = 0;
     }
   }
-  loadAllCards().then(cards => renderCalendarGrid(cards));
+  store.actions.loadVideos().then(() => renderCalendarGrid(getAllCards()));
 }
 
 async function goToToday() {
@@ -403,7 +426,7 @@ async function goToToday() {
   document.querySelectorAll('.calendar-view-btn').forEach(btn => {
     btn.classList.toggle('calendar-view-btn--active', btn.textContent.toLowerCase().includes(currentView));
   });
-  await loadAllCards();
+  await store.actions.loadVideos();
   renderCalendarGrid(getAllCards());
 }
 
@@ -437,7 +460,7 @@ function setCalendarView(view) {
     }
   }
   
-  loadAllCards().then(cards => renderCalendarGrid(cards));
+  store.actions.loadVideos().then(() => renderCalendarGrid(getAllCards()));
   
   // Update buttons
   document.querySelectorAll('.calendar-view-btn').forEach(btn => {
@@ -511,7 +534,7 @@ async function selectCalendarDay(dateStr) {
 function openCardFromCalendar(cardId, prefillDate = null) {
   // Open card modal on top of whatever view we're in (calendar, ideas, etc.)
   // Keep current view active, just show the modal
-  loadAllCards().then(() => {
+  store.actions.loadVideos().then(() => {
     openCardModal(cardId, 'ideas', prefillDate);
   });
 }
@@ -604,26 +627,17 @@ function handleDayColDrop(event, targetDate, targetBucket) {
   const bucketTimes = { morning: '10:00', afternoon: '14:00', evening: '20:00' };
   const timeStr = bucketTimes[targetBucket] || '10:00';
   const newPlannedDate = `${targetDate}T${timeStr}:00`;
-  
-  // Optimistisch: sofort neu rendern
-  const oldPlannedDate = card.planned_date;
-  card.planned_date = newPlannedDate;
-  renderCalendarGrid(getAllCards());
-  
-  // API Call
-  fetch(`/api/videos/${cardId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ planned_date: newPlannedDate })
-  }).then(res => {
-    if (!res.ok) throw new Error('API error');
-    showToast && showToast('Video verschoben', 'success');
-  }).catch(err => {
-    // Zurückrollen
-    card.planned_date = oldPlannedDate;
-    renderCalendarGrid(getAllCards());
-    showToast && showToast('Fehler beim Verschieben', 'error');
-  });
+
+  // Phase 3: optimistic update + rollback via store.actions.updateVideo.
+  // No manual render needed — store subscribers (above) re-render on
+  // successful reconcile. On error, the action rolls back automatically.
+  store.actions.updateVideo(cardId, { planned_date: newPlannedDate })
+    .then(() => {
+      showToast && showToast('Video verschoben', 'success');
+    })
+    .catch(err => {
+      showToast && showToast('Fehler beim Verschieben: ' + err.message, 'error');
+    });
 }
 
 /* ─── Helpers via utils.js ────────────────────────────────────────────────── */

@@ -31,10 +31,10 @@ function getActiveScript() {
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────
-let storeSubscribed = false;
+let scriptsStoreSubscribed = false;
 async function initScripts() {
-  if (!storeSubscribed) {
-    storeSubscribed = true;
+  if (!scriptsStoreSubscribed) {
+    scriptsStoreSubscribed = true;
     // Re-render the tree ONLY when the scripts data itself changes.
     // We deliberately ignore ui-only state changes (activeScriptId,
     // activeView) here because those don't affect the tree data —

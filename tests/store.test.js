@@ -72,6 +72,11 @@ test('createStore returns a store with the expected shape', () => {
   assert.equal(typeof store.actions.deleteScript, 'function');
   assert.equal(typeof store.actions.setActiveScript, 'function');
   assert.equal(typeof store.actions.setActiveView, 'function');
+  // Phase 3 additions:
+  assert.equal(typeof store.actions.loadVideos, 'function');
+  assert.equal(typeof store.actions.updateVideo, 'function');
+  assert.equal(typeof store.actions.deleteVideo, 'function');
+  assert.equal(typeof store.actions.createVideo, 'function');
 });
 
 test('createStore deep-clones the seed so callers cannot mutate by reference', () => {
@@ -319,4 +324,137 @@ test('loadScripts: cancellation marks earlier in-flight call as ignored', async 
     assert.equal(store.select(s => s.scripts[0].id), 'second');
     assert.equal(store.select(s => s.meta.loading.scripts), false);
   });
+});
+
+// --- Phase 3: video actions ---
+
+test('loadVideos: fetches and stores videos array', async () => {
+  const store = freshStore();
+  await withMockFetch(
+    async () => ({ ok: true, status: 200, json: async () => [{ id: 'v1', title: 'V1' }] }),
+    async () => {
+      const result = await store.actions.loadVideos();
+      assert.equal(result.length, 1);
+      assert.equal(store.select(s => s.videos[0].id), 'v1');
+      assert.equal(store.select(s => s.meta.loading.videos), false);
+    }
+  );
+});
+
+test('loadVideos: HTTP error sets meta.errors.videos and returns []', async () => {
+  const store = freshStore();
+  await withMockFetch(
+    async () => ({ ok: false, status: 503 }),
+    async () => {
+      const result = await store.actions.loadVideos();
+      assert.equal(result.length, 0);
+      assert.equal(store.select(s => s.meta.errors.videos), 'HTTP 503');
+    }
+  );
+});
+
+test('updateVideo: applies patch optimistically, rolls back on error', async () => {
+  const store = freshStore();
+  store.setState(d => { d.videos.push({ id: 'v1', title: 'Old', status: 'planned' }); });
+  await withMockFetch(async () => ({ ok: false, status: 500 }), async () => {
+    await assert.rejects(() =>
+      store.actions.updateVideo('v1', { title: 'New' })
+    );
+    const videos = store.select(s => s.videos);
+    assert.equal(videos[0].title, 'Old', 'rollback restores pre-patch title');
+  });
+});
+
+test('updateVideo: success replaces optimistic record with server response', async () => {
+  const store = freshStore();
+  store.setState(d => { d.videos.push({ id: 'v1', title: 'Old', status: 'planned' }); });
+  await withMockFetch(
+    async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 'v1', title: 'Server-confirmed', status: 'planned' })
+    }),
+    async () => {
+      const updated = await store.actions.updateVideo('v1', { title: 'Server-confirmed' });
+      assert.equal(updated.title, 'Server-confirmed');
+      assert.equal(store.select(s => s.videos[0].title), 'Server-confirmed');
+    }
+  );
+});
+
+test('updateVideo: throws when video not found', async () => {
+  const store = freshStore();
+  await assert.rejects(
+    () => store.actions.updateVideo('nope', { title: 'X' }),
+    /video nope not found/
+  );
+});
+
+test('deleteVideo: removes from state, rolls back on server error', async () => {
+  const store = freshStore();
+  store.setState(d => { d.videos.push({ id: 'v1', title: 'Doomed' }); });
+  await withMockFetch(async () => ({ ok: false, status: 404 }), async () => {
+    await assert.rejects(() => store.actions.deleteVideo('v1'));
+    const videos = store.select(s => s.videos);
+    assert.equal(videos.length, 1, 'rollback re-inserts deleted video');
+    assert.equal(videos[0].id, 'v1');
+  });
+});
+
+test('deleteVideo: success returns the deleted record', async () => {
+  const store = freshStore();
+  store.setState(d => { d.videos.push({ id: 'v1', title: 'Going away' }); });
+  await withMockFetch(
+    async () => ({ ok: true, status: 200, json: async () => ({ id: 'v1', title: 'Going away' }) }),
+    async () => {
+      const deleted = await store.actions.deleteVideo('v1');
+      assert.equal(deleted.id, 'v1');
+      assert.equal(store.select(s => s.videos.length), 0);
+    }
+  );
+});
+
+test('deleteVideo: no-op when video not in state', async () => {
+  const store = freshStore();
+  await withMockFetch(
+    async () => ({ ok: true, status: 200, json: async () => ({}) }),
+    async () => {
+      const result = await store.actions.deleteVideo('nonexistent');
+      assert.equal(result, null);
+    }
+  );
+});
+
+test('createVideo: optimistic insert, reconciled with server record', async () => {
+  const store = freshStore();
+  await withMockFetch(
+    async (url, opts) => {
+      if (opts && opts.method === 'POST') {
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({ id: 'server-v1', title: 'New video', status: 'planned' })
+        };
+      }
+      return { ok: false, status: 404 };
+    },
+    async () => {
+      const created = await store.actions.createVideo({ title: 'New video' });
+      assert.equal(created.id, 'server-v1');
+      const videos = store.select(s => s.videos);
+      assert.equal(videos.length, 1);
+      assert.equal(videos[0].__optimistic, false);
+    }
+  );
+});
+
+test('createVideo: server error rolls back optimistic insert', async () => {
+  const store = freshStore();
+  await withMockFetch(
+    async () => ({ ok: false, status: 500 }),
+    async () => {
+      await assert.rejects(() => store.actions.createVideo({ title: 'Will fail' }));
+      assert.equal(store.select(s => s.videos.length), 0);
+    }
+  );
 });

@@ -378,8 +378,12 @@ app.put('/api/scripts/:id', (req, res) => {
 
 app.delete('/api/scripts/:id', (req, res) => {
   try {
+    const existing = get('SELECT * FROM scripts WHERE id = ?', req.params.id);
+    if (!existing) { res.status(404).json({ error: 'Script nicht gefunden' }); return; }
     run('DELETE FROM scripts WHERE id = ?', req.params.id);
-    res.json({ status: 'ok' });
+    // Return the deleted record so the frontend store's deleteScript
+    // action's rollback path has a snapshot. (ADR-001 + Phase 3, 2026-06-25)
+    res.json({ ...existing, tags: existing.tags ? JSON.parse(existing.tags) : [] });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -621,9 +625,13 @@ app.patch('/api/videos/:id', (req, res) => {
 app.delete('/api/videos/:id', (req, res) => {
   try {
     const { id } = req.params;
+    const existing = getAll('SELECT * FROM videos WHERE id = ?', id)[0];
+    if (!existing) { res.status(404).json({ error: 'Video nicht gefunden' }); return; }
     run('DELETE FROM videos WHERE id = ?', id);
     saveDB();
-    res.json({ ok: true });
+    // Return the deleted record so the frontend store's deleteVideo action
+    // can keep its rollback snapshot aligned. (ADR-001 + Phase 3, 2026-06-25)
+    res.json({ ...existing, tags: existing.tags ? JSON.parse(existing.tags) : [] });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

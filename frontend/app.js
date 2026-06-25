@@ -752,7 +752,8 @@ function closeCommandPalette() {
 function renderPaletteResults(query) {
   const container = document.getElementById('commandPaletteResults');
   if (!container) return;
-  const all = (typeof getAllCards === 'function' ? getAllCards() : []) || [];
+  // Phase 3: read videos from the central store instead of legacy API.
+  const all = store.select(s => s.videos) || [];
   const q = (query || '').toLowerCase().trim();
   let results = all;
   if (q) {
@@ -816,8 +817,9 @@ function selectActivePaletteItem() {
 
 function openCardFromPalette(cardId) {
   closeCommandPalette();
-  if (typeof loadAllCards === 'function') loadAllCards().then(() => openCardModal(cardId));
-  else openCardModal(cardId);
+  // Phase 3: trigger a fresh video load via the store action so the modal
+  // sees the latest state, then open it.
+  store.actions.loadVideos().then(() => openCardModal(cardId));
 }
 
 // Live-search as user types

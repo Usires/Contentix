@@ -579,3 +579,133 @@ this as a separate entry in the changelog.
   conversation.
 
 By Nix 🐧 & Dirk, 2026. *"Centralize state. Then ship."*
+
+---
+
+## 2026-06-25 — ADR-001 Phase 3: All views migrated, legacy API deleted
+
+Dirk said "lass uns direkt Phase 3 machen, dann haben wir das Thema
+mal durch". Done in this single push.
+
+### Migration scope
+
+Four views consumed the legacy `getAllCards` / `loadAllCards` etc.
+API: kanban.js, calendar.js, app.js (history.js was already on its
+own endpoint, no work needed).
+
+### Video actions in the store
+
+Added `loadVideos`, `createVideo`, `updateVideo`, `deleteVideo` —
+mirroring the script actions exactly. Same optimistic + rollback
+pattern. Same cancellation for rapid successive loads.
+
+Wrote 10 new unit tests. Total store tests now at 30.
+
+### kanban.js migration
+
+Five call sites converted:
+- `loadCards()` → calls `store.actions.loadVideos()` instead of fetch
+- Drop handler: `fetch + loadCards()` → `store.actions.updateVideo(...)`
+- `deleteCard`: same pattern
+- `archiveCard`: `PATCH /status: 'archived'` → `store.actions.updateVideo`
+- `duplicateCard`: `POST` → `store.actions.createVideo`
+- Form submit handler: split into `updateVideo` (when `id` present) or
+  `createVideo` (when not)
+
+Subscribe-with-hash pattern, similar to scripts.js. Re-renders on
+videos data changes. The `getAllCards()` helper stays as a thin
+`store.select(s => s.videos)` wrapper for code clarity.
+
+### calendar.js migration
+
+Twelve call sites converted:
+- `renderCalendar` subscribes + loads via store
+- `prevCalendarPeriod` / `nextCalendarPeriod` / `setCalendarView` /
+  `goToToday` all use `store.actions.loadVideos` instead of
+  legacy `loadAllCards`
+- The drag-drop handler `handleDayColDrop` is the meatiest one:
+  was direct `fetch PATCH /api/videos/:id` + manual rollback on error.
+  Now: `store.actions.updateVideo(id, { planned_date })` with the
+  action's built-in optimistic + rollback. The subscribe handles the
+  re-render. The manual rollback code is GONE.
+
+### app.js migration
+
+Two call sites in the command palette:
+- `renderPaletteResults` reads `store.select(s => s.videos)` directly
+- `openCardFromPalette` triggers `store.actions.loadVideos().then(...)`
+  to refresh before opening the modal
+
+### DELETE API fixes
+
+Same kind of issue as the PUT/POST round in Phase 2:
+- DELETE `/api/scripts/:id` was returning `{status: 'ok'}` instead
+  of the deleted record
+- DELETE `/api/videos/:id` was returning `{ok: true}`
+
+Both now return the deleted record. This matters for the store's
+delete actions — they need a snapshot for rollback, and they were
+getting `{ok: true}` which is useless for that purpose.
+
+### Legacy API killed
+
+The pre-Phase-1 mini-store (getAllCards, loadAllCards, setAllCards,
+onAllCardsChange) lived in store.js as a deprecated wrapper since
+Phase 1. Phase 3 deletes it entirely — 36 lines of code gone.
+
+I kept the per-file `getAllCards()` thin wrappers in kanban.js and
+calendar.js. They're not legacy-API: they're code-clarity helpers
+that do `store.select(s => s.videos)`. The function name tells the
+reader "give me all the cards" which is clearer than
+`store.select(s => s.videos)`. App.js and scripts.js don't have this
+wrapper — they use `store.select` directly.
+
+### Page-error score
+
+After Phase 3, **zero page errors** across all four views (bibliothek,
+kanban, calendar, history). Before Phase 3 there were three recurring
+ones:
+- `allCards is not defined` in kanban.js (the `const allCards = ...`
+  bug fix from Phase 2 — already gone)
+- `Cannot read properties of null (reading 'triggerHandler')` from
+  scripts.js (the Subscribe-with-hash fix from Phase 2 — already gone)
+- The kanban.js manual-fetch race that caused occasional empty-board
+  flashes after a delete (now fixed by the store's automatic
+  reconciliation)
+
+### Counts
+
+- `frontend/store.js`: 374 → 426 lines (+52, video actions + tests)
+- `frontend/kanban.js`: 729 → 736 lines (+7, mostly the
+  subscribe-with-hash block)
+- `frontend/calendar.js`: 629 → 632 lines (+3, mostly the subscribe
+  helper)
+- `frontend/app.js`: 2 lines changed in command-palette
+- `tests/store.test.js`: 388 → 622 lines (+234, 10 new video specs)
+- `index.js`: PUT/POST/DELETE handlers updated for full-record returns
+- Legacy API deleted: -36 lines from store.js
+
+### Verification
+
+- 42/42 tests green (30 store + 12 sort-comparator)
+- Browser smoke: all four views render, no page errors, store +
+  server stay in sync through drag-drop, archive, delete, duplicate,
+  modal save
+
+### What's next (Phase 4 — Undo/Redo)
+
+Now that all mutations go through actions, the store has a natural
+audit trail. Phase 4 = record each action call into an undo stack,
+add `store.actions.undo()` and `store.actions.redo()`.
+
+This is the conversation where I want to know:
+1. What counts as one "undo step" — every action, or grouped by
+   session?
+2. How deep should the stack be? (Memory × action-size cost)
+3. UI: Cmd-Z keyboard shortcut? Visible undo button?
+4. Server-side? Or only client-side?
+
+This is gated on you saying "let's do undo/redo." Otherwise: contentix
+is now done with ADR-001.
+
+By Nix 🐧 & Dirk, 2026. *"Centralize state. Then ship."*
