@@ -347,3 +347,98 @@ this was a textbook example of why.
 
 By Nix 🐧 & Dirk, 2026. *"Always render the fallback, never
 render it twice."*
+
+---
+
+## 2026-06-25 — R2 Sort-Dedup, Theme-Polish & State-Store ADR
+
+A coordinated four-ticket day, all out of the 5-Bot-Review backlog
+from 2026-06-18. Started the morning by walking the boards with Dirk;
+he asked me to "work through the Contentix tickets, then clean up the
+docs and commit." So that's what I did — in this order:
+
+### YOKE #103 — Tests for the sort behavior, first
+
+Wrote `tests/sort-comparator.test.js` *before* writing the comparator
+itself. The test file self-gates: if `getScriptSortComparator` doesn't
+yet exist in `utils.js`, every test short-circuits via
+`if (!comparatorAvailable) return`. That meant the tests could land
+before the refactor and act as a behavior-preservation contract:
+green before AND after the refactor, no exceptions.
+
+I hit two real bugs while writing them, and both were my fault, not
+the production code's:
+
+1. **Forgetting parentheses.** `getScriptSortComparator` is a *factory*
+   that returns the comparator. My first pass called it as
+   `.sort(getScriptSortComparator)` instead of
+   `.sort(getScriptSortComparator())` — passing the factory as the
+   comparator, which made the sort compare weird things. Tests
+   exploded in a glorious cascade of 8 failures. `sed` with a regex
+   anchor (`$`) only caught end-of-line cases, so a final
+   `if`-block-and-pickInt missed a few — manual fixup followed.
+   Lesson: when refactoring **function-of-function**, always test
+   the call-site first, not the implementation.
+
+2. **Spec-vs-reference mismatch on `undefined`.** The inline expression
+   would have crashed on `script.title === undefined` (because
+   `undefined.localeCompare` throws). My new comparator guards
+   against that. The fuzz test correctly flagged this as a
+   *deliberate behavior improvement* rather than a regression. I had
+   to re-read my own test to convince myself that "comparator doesn't
+   throw, but inline reference does" is *exactly* the right outcome.
+   The test now asserts the comparator's safety, not parity with the
+   broken-by-design inline behavior.
+
+### WEAVE #102 — Refactor, with the safety net
+
+Added `getScriptSortComparator()` to `utils.js` (with JSDoc that points
+back to the spec and the tests — `Spec: docs/r2-script-sort-spec.md.
+Tests: tests/sort-comparator.test.js.`). Replaced both inline calls
+in `scripts.js`. Verified via `grep -n 'position.*localeCompare'`
+that no third copy was hiding somewhere. All 12 tests green.
+
+### WISP #104 — Theme-compliance for search + footer
+
+This was a 5-minute job: `.scripts-search` and `.scripts-list-footer`
+had hardcoded RGBA and hex values that *happened* to match the default
+Light Cream theme. Replaced with `var(--bg-surface)`,
+`var(--text-primary)`, `var(--text-secondary)`. For the transparent
+borders, used `color-mix(in srgb, var(--text-primary) X%, transparent)`
+— works across all four themes without per-theme overrides. Verified
+visually with a Playwright screenshot at `/tmp/wisp-search-light.png`
+(search input, footer "9 Skripte" counter, the whole scripts view).
+Looks good.
+
+### FORGE #105 — ADR for the centralized state store
+
+The hardest of the four, not because the code is hard (no code at all
+in this ticket — it's an ADR) but because **the temptation to
+over-design is enormous**. I caught myself writing "Phase 5: plugin
+system for stores" and laughed, then deleted it. What landed:
+`docs/adr-001-state-store.md`. The decision: tiny in-house store, no
+external deps, ~150 LOC target, phased rollout where Phase 1 is just
+landing the store skeleton without migrating any view (so we can vet
+the API in isolation before committing any module to it).
+
+The alternative table in the ADR was the most useful part to write:
+"Redux vs Zustand vs MobX vs custom" with concrete pros/cons for *our*
+codebase specifically. It's the kind of document I wish I'd had before
+I'd started writing code.
+
+### Process notes
+
+- **Self-gating tests are lovely.** YOKE's `if (!comparatorAvailable)
+  return` pattern means the test file can land in the same commit as
+  the comparator without an awkward "tests are red until I land the
+  impl" intermediate state. CI never sees a red build.
+- **Specs before code, even for tiny refactors.** I almost skipped
+  writing `docs/r2-script-sort-spec.md` for "just a 3-line function."
+  Glad I didn't — the spec caught the `undefined.title` question,
+  which I'd otherwise have made inconsistent with the inline
+  expression. Specs pay off at 5+ lines too.
+- **Test runs are ~95ms total.** Worth running on every change, not
+  just pre-commit. Made iteration way faster.
+
+By Nix 🐧 & Dirk, 2026. *"Centralize state, decentralize everything
+else."*

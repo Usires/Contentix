@@ -310,6 +310,18 @@ The full client lives in `index.js` (search for `makeVidiqCmd` and
   blocking.
 - Research jobs are 1-per-video at a time: a second `POST` while
   one is running returns HTTP 409.
+- **Test conventions** (added 2026-06-25):
+  - **Pure functions / utils** → `node --test tests/*.test.js` (Node 18+,
+    no extra deps). Example: `tests/sort-comparator.test.js`. Fast feedback,
+    no browser. Run a single file or the full directory.
+  - **Browser / DOM behavior** → `npx playwright test tests/*.spec.js`.
+    Example: `tests/hero-fallback.spec.js`. Use when the thing under test
+    needs a real `window`/`document` or visible rendering for assertions.
+  - **Choosing between them:** if you can write the test without importing
+    `@playwright/test`, use `node --test`. Playwright costs ~3-5s per test
+    for browser launch; node-test is sub-100ms per test.
+  - All new pure utilities added to `frontend/utils.js` should ship with a
+    `tests/<utility-name>.test.js` next to the existing one.
 
 ---
 

@@ -2,6 +2,34 @@
    CONTENTIX — Shared Utility Functions
    ========================================================================== */
 
+/**
+ * Returns a comparator function for sorting Contentix script objects.
+ *
+ * Sort order:
+ *   1. `position` ascending (missing / null / undefined → 0)
+ *   2. `title` ascending via `String.prototype.localeCompare` with the
+ *      user-default locale. Empty / missing titles sort BEFORE non-empty
+ *      ones (localeCompare default behavior).
+ *
+ * Used by scripts.js (buildJsTree + select_node handler) — replaces two
+ * inline `.sort(...)` expressions that previously had to stay in sync by
+ * hand. Spec: docs/r2-script-sort-spec.md. Tests: tests/sort-comparator.test.js.
+ *
+ * @returns {(a: object, b: object) => number}
+ */
+function getScriptSortComparator() {
+  return (a, b) => {
+    const posA = a.position || 0;
+    const posB = b.position || 0;
+    if (posA !== posB) return posA - posB;
+    // Coerce undefined/null → '' so localeCompare never sees undefined
+    // (which returns NaN and breaks sort).
+    const titleA = (a.title == null) ? '' : a.title;
+    const titleB = (b.title == null) ? '' : b.title;
+    return titleA.localeCompare(titleB);
+  };
+}
+
 function escapeHtml(str) {
   if (!str) return '';
   return str.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));

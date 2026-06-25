@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Refactored
+- **🔁 Script-Sort-Dedup (R2, WEAVE #102)**: Identische `.sort((a,b) =>
+  (a.position||0) - (b.position||0) || a.title.localeCompare(b.title))`-Logik
+  lebte zweimal in `scripts.js` (Zeile 107 + 183, `buildJsTree` und
+  `select_node`-Handler). Jetzt zentral in `utils.js` als
+  `getScriptSortComparator()`. Coercet `null`/`undefined` für `title` zu
+  leerem String (war vorher ein latenter Crash-Pfad). Spec:
+  `docs/r2-script-sort-spec.md`. Tests: `tests/sort-comparator.test.js`
+  (12/12 grün, inkl. 200-Iterationen-Fuzz gegen Inline-Referenz für
+  Behavior-Preservation).
+
+### Changed
+- **🎨 Search-Bar + List-Footer Theme-Compliance (WISP #104)**: Hardcoded
+  RGBA-/Hex-Farben in `.scripts-search` und `.scripts-list-footer` durch
+  Theme-Variablen ersetzt (`--bg-surface`, `--text-primary`,
+  `--text-secondary`). Transparente Borders jetzt via
+  `color-mix(in srgb, var(--text-primary) X%, transparent)` — folgen
+  automatisch allen 4 Theme-Varianten (Light Cream / Forest / Coffee /
+  Midnight) ohne separate Regel pro Theme. Visuell verifiziert via
+  Playwright-Smoke (`/tmp/wisp-search-light.png`).
+
+### Added
+- **📋 ADR-001: Centralized State Store (FORGE #105)**: Architecture
+  Decision Record für den Vorschlag, das verstreute `let`-State-Modell
+  (5+ Module, 18+ globale Variablen) durch einen kleinen In-House-Store
+  zu ersetzen. Entscheidung: Custom Mini-Store (~150 LOC, kein Redux/
+  Zustand/MobX), phased Rollout (Phase 1 = Store + Tests; Phase 2-4 =
+  Migration pro View + optionales Undo/Redo). Volltext:
+  `docs/adr-001-state-store.md`.
+- **🧪 Test-Runner: `node --test`** für Pure-Function-Tests
+  (`tests/sort-comparator.test.js`). Playwright bleibt für Browser-Tests.
+  Keine neuen devDependencies — `node:test` ist seit Node 18 stabil.
+
 ## [0.13.0] — 2026-06-19
 ## [0.12.0] — 2026-06-19
 

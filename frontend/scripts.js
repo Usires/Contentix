@@ -112,7 +112,7 @@ function buildJsTree() {
   const treeData = orderedFolders.map(folder => {
     const folderScripts = allScripts
       .filter(s => s.folder === folder)
-      .sort((a, b) => (a.position || 0) - (b.position || 0) || a.title.localeCompare(b.title));
+      .sort(getScriptSortComparator());
 
     return {
       id: `folder:${folder}`,
@@ -188,7 +188,7 @@ function buildJsTree() {
         const folderName = data.node.li_attr['data-folder'];
         const folderScripts = allScripts
           .filter(s => s.folder === folderName)
-          .sort((a, b) => (a.position || 0) - (b.position || 0) || a.title.localeCompare(b.title));
+          .sort(getScriptSortComparator());
         if (folderScripts.length > 0) {
           const childNodes = folderScripts.map(s => ({
             id: `script:${s.id}`,
