@@ -78,7 +78,6 @@ async function renderCalendar() {
       await store.actions.loadVideos();
     } catch (_) {}
   }
-  } catch (_) {}
 
   container.innerHTML = `
     <div class="calendar-container">
