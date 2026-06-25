@@ -2,8 +2,9 @@
 // API defined in app.js
 
 // ─── State ─────────────────────────────────────────────────────────────────
-let allScripts = [];
-let activeScript = null;
+// `getAllScripts()` and `getActiveScript()` migrated to the central store (ADR-001).
+// Reads via store.select(...), writes via store.actions.*.
+// Locals: autoSaveTimer/isDirty/jsTreeInstance stay here — view-local state.
 let autoSaveTimer = null;
 let isDirty = false;
 let jsTreeInstance = null;
@@ -15,22 +16,57 @@ const TREE_STATE_KEY = 'contentix.scripts.treeState';
 const TREE_SEARCH_KEY = 'contentix.scripts.lastSearch';
 const TREE_WIDTH_KEY = 'contentix.scripts.sidebarWidth';
 
+// ─── Store-bound selectors ─────────────────────────────────────────────────
+// Use these instead of touching a top-level `getAllScripts()` / `getActiveScript()`.
+// Keep them tiny — they're the only places that know the state shape.
+
+function getAllScripts() {
+  return store.select(s => s.scripts);
+}
+function getActiveScript() {
+  return store.select(s => {
+    const id = s.ui.activeScriptId;
+    return id ? s.scripts.find(x => x.id === id) || null : null;
+  });
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────
+let storeSubscribed = false;
 async function initScripts() {
+  if (!storeSubscribed) {
+    storeSubscribed = true;
+    // Re-render the tree ONLY when the scripts data itself changes.
+    // We deliberately ignore ui-only state changes (activeScriptId,
+    // activeView) here because those don't affect the tree data —
+    // handling them in renderScriptsView would tear down jsTreeInstance
+    // mid-click, causing jstree's internal handler to call
+    // triggerHandler() on the destroyed instance.
+    //
+    // Comparison strategy: hash the scripts array; render only on change.
+    // Cheap enough at our scale (~hundreds of scripts).
+    let lastScriptsHash = null;
+    store.subscribe((state) => {
+      const container = document.getElementById('scriptsContainer');
+      if (!container || container.offsetParent === null) return;
+      const hash = JSON.stringify(state.scripts);
+      if (hash === lastScriptsHash) return;
+      lastScriptsHash = hash;
+      renderScriptsView();
+    });
+  }
   await loadVideosForLink();
-  await loadScripts();
+  await store.actions.loadScripts();
+  // loadScripts fires its own subscribers; the subscription above handles it.
 }
 
 // ─── Load ─────────────────────────────────────────────────────────────────
+// Kept as a thin wrapper for callers (some legacy code may still call
+// scripts.js loadScripts). Prefer store.actions.loadScripts() directly.
 async function loadScripts() {
   const container = document.getElementById('scriptsContainer');
   if (!container) return;
-
   try {
-    const res = await fetch(`${API}/scripts`);
-    if (!res.ok) throw new Error('API nicht erreichbar');
-    allScripts = await res.json();
-    renderScriptsView();
+    await store.actions.loadScripts();
   } catch (err) {
     container.innerHTML = `<div class="scripts-empty-state"><h3>Fehler</h3><p>${err.message}</p></div>`;
   }
@@ -72,7 +108,7 @@ function renderScriptsView() {
           <div class="status-legend-row"><span class="status-legend-icon">🎬</span><span class="status-legend-label">Mit Video verlinkt</span></div>
         </div>
         <div class="scripts-list-footer">
-          <span id="scriptCount">${allScripts.length} Skripte</span>
+          <span id="scriptCount">${getAllScripts().length} Skripte</span>
         </div>
       </div>
       <div class="scripts-editor-panel" id="scriptsEditorPanel">
@@ -103,14 +139,14 @@ function buildJsTree() {
 
   // Ensure all default folders are present (even if empty in DB)
   const folderSet = new Set(DEFAULT_FOLDERS);
-  allScripts.forEach(s => { if (s.folder) folderSet.add(s.folder); });
+  getAllScripts().forEach(s => { if (s.folder) folderSet.add(s.folder); });
   const orderedFolders = [
     ...DEFAULT_FOLDERS.filter(f => folderSet.has(f)),
     ...[...folderSet].filter(f => !DEFAULT_FOLDERS.includes(f)).sort()
   ];
 
   const treeData = orderedFolders.map(folder => {
-    const folderScripts = allScripts
+    const folderScripts = getAllScripts()
       .filter(s => s.folder === folder)
       .sort(getScriptSortComparator());
 
@@ -128,7 +164,7 @@ function buildJsTree() {
         text: buildScriptNodeText(s),
         type: 'script',
         li_attr: { 'data-script-id': s.id, 'data-folder': folder, 'title': s.title || 'Unbenannt' },
-        state: { selected: activeScript?.id === s.id }
+        state: { selected: getActiveScript()?.id === s.id }
       }))
     };
   });
@@ -186,7 +222,7 @@ function buildJsTree() {
         // JSTree quirk: open_node() does nothing for nodes whose children
         // were stripped during close. Re-inject from cached data, then open.
         const folderName = data.node.li_attr['data-folder'];
-        const folderScripts = allScripts
+        const folderScripts = getAllScripts()
           .filter(s => s.folder === folderName)
           .sort(getScriptSortComparator());
         if (folderScripts.length > 0) {
@@ -195,7 +231,7 @@ function buildJsTree() {
             text: buildScriptNodeText(s),
             type: 'script',
             li_attr: { 'data-script-id': s.id, 'data-folder': folderName },
-            state: { selected: activeScript?.id === s.id }
+            state: { selected: getActiveScript()?.id === s.id }
           }));
           data.node.children = childNodes;
           data.node.children_d = childNodes;
@@ -304,7 +340,7 @@ function buildContextMenu(node) {
     };
   } else if (node.type === 'script') {
     const sid = node.li_attr['data-script-id'];
-    const script = allScripts.find(s => s.id === sid);
+    const script = getAllScripts().find(s => s.id === sid);
     return {
       'open': {
         label: '📝 Öffnen',
@@ -348,7 +384,7 @@ async function handleNodeMove(data) {
     if (!res.ok) throw new Error('Move fehlgeschlagen');
 
     // Update local cache
-    const script = allScripts.find(s => s.id === scriptId);
+    const script = getAllScripts().find(s => s.id === scriptId);
     if (script) {
       script.folder = newFolder;
       script.position = newPosition;
@@ -390,18 +426,11 @@ async function handleScriptRename(data) {
   const newText = data.text;
   if (!scriptId || !newText) return;
   try {
-    await fetch(`${API}/scripts/${scriptId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: newText })
-    });
-    const script = allScripts.find(s => s.id === scriptId);
-    if (script) {
-      script.title = newText;
-      if (activeScript?.id === scriptId) {
-        activeScript.title = newText;
-        renderEditor();
-      }
+    await store.actions.updateScript(scriptId, { title: newText });
+    // Store subscribers handle the re-render. Re-render editor explicitly
+    // if the renamed script is the active one so the title input updates.
+    if (getActiveScript()?.id === scriptId) {
+      renderEditor();
     }
   } catch (e) {
     console.error('Rename error:', e);
@@ -416,12 +445,12 @@ async function deleteFolder(folder) {
     showToast('❌ Default-Folder kann nicht gelöscht werden', true);
     return;
   }
-  const count = allScripts.filter(s => s.folder === folder).length;
+  const count = getAllScripts().filter(s => s.folder === folder).length;
   if (count > 0) {
     const ok = confirm(`Folder „${folder}" enthält ${count} Skript(e).\n\nWohin damit?\n\nOK = Verschieben nach „scripts" & Folder löschen`);
     if (!ok) return;
     // Move all to 'scripts'
-    for (const s of allScripts.filter(s => s.folder === folder)) {
+    for (const s of getAllScripts().filter(s => s.folder === folder)) {
       await fetch(`${API}/scripts/${s.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -444,7 +473,7 @@ async function createNewFolderInline() {
   if (!name || !name.trim()) return;
   const trimmed = name.trim();
 
-  if (DEFAULT_FOLDERS.includes(trimmed) || allScripts.some(s => s.folder === trimmed)) {
+  if (DEFAULT_FOLDERS.includes(trimmed) || getAllScripts().some(s => s.folder === trimmed)) {
     showToast(`❌ Folder „${trimmed}" existiert bereits`, true);
     return;
   }
@@ -463,7 +492,7 @@ async function createNewFolderInline() {
 // ─── Script Operations ─────────────────────────────────────────────────────
 function getCurrentFolderFromTree() {
   // If a script is selected, use its folder; otherwise the first opened folder
-  if (activeScript?.folder) return activeScript.folder;
+  if (getActiveScript()?.folder) return getActiveScript().folder;
   // Try to find first selected folder in tree
   const selected = jsTreeInstance?.get_selected(true);
   if (selected?.length > 0) {
@@ -483,27 +512,20 @@ async function createNewScriptInFolder(folder) {
     return;
   }
   try {
-    const res = await fetch(`${API}/scripts`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: 'Neues Skript',
-        slug: 'script-' + Date.now(),
-        folder: folder,
-        status: 'draft',
-        content: '',
-        video_id: null,
-        video_format: 'longform',
-        tags: [],
-        position: 0
-      })
+    const newScript = await store.actions.createScript({
+      title: 'Neues Skript',
+      slug: 'script-' + Date.now(),
+      folder: folder,
+      status: 'draft',
+      content: '',
+      video_id: null,
+      video_format: 'longform',
+      tags: [],
+      position: 0
     });
-    if (!res.ok) throw new Error('Fehler');
-    const newScript = await res.json();
-    allScripts.unshift(newScript);
-    activeScript = newScript;
-    refreshTree();
-    updateScriptCount();
+    store.actions.setActiveScript(newScript.id);
+    // Store subscribers re-render the tree and count automatically.
+    // Editor re-render is still needed because activeScript is a derived read.
     renderEditor();
     showToast(`📄 Neues Skript in „${folder}"`);
   } catch (err) {
@@ -513,7 +535,7 @@ async function createNewScriptInFolder(folder) {
 }
 
 async function duplicateScript(scriptId) {
-  const original = allScripts.find(s => s.id === scriptId);
+  const original = getAllScripts().find(s => s.id === scriptId);
   if (!original) return;
   try {
     const res = await fetch(`${API}/scripts`, {
@@ -541,7 +563,7 @@ async function duplicateScript(scriptId) {
 }
 
 async function toggleArchiveScript(scriptId) {
-  const script = allScripts.find(s => s.id === scriptId);
+  const script = getAllScripts().find(s => s.id === scriptId);
   if (!script) return;
 
   if (script.status === 'archived') {
@@ -582,19 +604,16 @@ async function toggleArchiveScript(scriptId) {
 }
 
 async function deleteScriptById(scriptId) {
-  const script = allScripts.find(s => s.id === scriptId);
+  const script = getAllScripts().find(s => s.id === scriptId);
   if (!script) return;
   if (!confirm(`🗑️ Skript „${script.title}" wirklich löschen?\n\nDas ist nicht widerrufbar!`)) return;
   try {
-    const res = await fetch(`${API}/scripts/${scriptId}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error('Löschen fehlgeschlagen');
-    allScripts = allScripts.filter(s => s.id !== scriptId);
-    if (activeScript?.id === scriptId) {
-      activeScript = null;
+    await store.actions.deleteScript(scriptId);
+    if (getActiveScript()?.id === scriptId) {
+      store.actions.setActiveScript(null);
       renderEditor();
     }
-    refreshTree();
-    updateScriptCount();
+    // Store subscribers re-render the tree and count automatically.
     showToast('🗑️ Gelöscht');
   } catch (e) {
     console.error(e);
@@ -688,7 +707,7 @@ function refreshTree() {
 
 function updateScriptCount() {
   const el = document.getElementById('scriptCount');
-  if (el) el.textContent = `${allScripts.length} Skript${allScripts.length === 1 ? '' : 'e'}`;
+  if (el) el.textContent = `${getAllScripts().length} Skript${getAllScripts().length === 1 ? '' : 'e'}`;
 }
 
 // ─── Editor Render (unchanged from before) ─────────────────────────────────
@@ -705,7 +724,7 @@ function renderEmptyState() {
 function renderEditor() {
   const panel = document.getElementById('scriptsEditorPanel');
   if (!panel) return;
-  if (!activeScript) {
+  if (!getActiveScript()) {
     panel.innerHTML = renderEmptyState();
     return;
   }
@@ -714,7 +733,7 @@ function renderEditor() {
 }
 
 function renderEditorHTML() {
-  const s = activeScript;
+  const s = getActiveScript();
   return `
     <div class="scripts-editor-header">
       <input type="text" class="scripts-editor-title" id="scriptTitleInput"
@@ -779,12 +798,12 @@ function allVideosHtml(selectedId) {
 
 // ─── Print ─────────────────────────────────────────────────────────────────
 function printActiveScript() {
-  if (!activeScript) return;
-  const title = activeScript.title || 'Unbenanntes Skript';
-  const body = renderPreview(activeScript.content || '');
-  const linkedVideo = activeScript.video_id ? getVideoTitle(activeScript.video_id) : null;
+  if (!getActiveScript()) return;
+  const title = getActiveScript().title || 'Unbenanntes Skript';
+  const body = renderPreview(getActiveScript().content || '');
+  const linkedVideo = getActiveScript().video_id ? getVideoTitle(getActiveScript().video_id) : null;
   const date = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const wordCount = countWords(activeScript.content || '');
+  const wordCount = countWords(getActiveScript().content || '');
 
   let iframe = document.getElementById('printIframe');
   if (!iframe) {
@@ -922,8 +941,8 @@ function setupEditorEvents() {
       select.innerHTML = '<option value="">— Kein Video —</option>' +
         window._allVideos.map(v => `<option value="${v.id}">${escapeHtml(v.title)}</option>`).join('');
     }
-    if (activeScript?.video_id) {
-      select.value = activeScript.video_id;
+    if (getActiveScript()?.video_id) {
+      select.value = getActiveScript().video_id;
     }
   }
 
@@ -1000,10 +1019,10 @@ function insertCode() {
 
 // ─── CRUD Wrappers (legacy, called by editor buttons) ──────────────────────
 async function selectScript(id) {
-  if (isDirty && activeScript) {
+  if (isDirty && getActiveScript()) {
     await saveScript(true);
   }
-  activeScript = allScripts.find(s => s.id === id) || null;
+  store.actions.setActiveScript(id);
   // JSTree visually syncs via state.selected in the tree data.
   // We do NOT call jsTreeInstance.select_node() here — it would re-fire
   // the select_node event and create an infinite loop.
@@ -1016,13 +1035,13 @@ async function createNewScript() {
 }
 
 async function archiveScript() {
-  if (!activeScript) return;
-  return toggleArchiveScript(activeScript.id);
+  if (!getActiveScript()) return;
+  return toggleArchiveScript(getActiveScript().id);
 }
 
 async function deleteScript() {
-  if (!activeScript) return;
-  return deleteScriptById(activeScript.id);
+  if (!getActiveScript()) return;
+  return deleteScriptById(getActiveScript().id);
 }
 
 function showToast(message, isError = false) {
@@ -1041,30 +1060,20 @@ function showToast(message, isError = false) {
 }
 
 async function saveScript(silent = false) {
-  if (!activeScript) return;
+  if (!getActiveScript()) return;
+  const activeBefore = getActiveScript();
   const textarea = document.getElementById('scriptTextarea');
   const titleInput = document.getElementById('scriptTitleInput');
   const content = textarea ? textarea.value : '';
-  const title = titleInput ? titleInput.value : activeScript.title;
+  const title = titleInput ? titleInput.value : activeBefore.title;
 
   // Capture pre-save state so we can decide what to update in the tree
-  const oldFolder = activeScript.folder;
-  const oldStatus = activeScript.status;
-  const oldTitle = activeScript.title;
+  const oldFolder = activeBefore.folder;
+  const oldStatus = activeBefore.status;
+  const oldTitle = activeBefore.title;
 
   try {
-    const res = await fetch(`${API}/scripts/${activeScript.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...activeScript, title, content })
-    });
-    if (!res.ok) throw new Error('Speichern fehlgeschlagen');
-    const idx = allScripts.findIndex(s => s.id === activeScript.id);
-    if (idx !== -1) {
-      activeScript.title = title;
-      activeScript.content = content;
-      allScripts[idx] = activeScript;
-    }
+    await store.actions.updateScript(activeBefore.id, { title, content });
     isDirty = false;
     if (!silent) {
       const status = document.getElementById('saveStatus');
@@ -1073,14 +1082,13 @@ async function saveScript(silent = false) {
       const status = document.getElementById('saveStatus');
       if (status) status.textContent = '✓ auto-gespeichert';
     }
+    // Read fresh active record (the one the server confirmed).
+    const activeAfter = getActiveScript();
     // In-place tree update (no full rebuild = no cursor jump).
-    // Only redraw the affected node; rebuild only if folder/status changed.
-    if (oldFolder !== activeScript.folder || oldStatus !== activeScript.status) {
-      // Structural change → rebuild required (folder/status drive tree layout)
+    if (oldFolder !== activeAfter.folder || oldStatus !== activeAfter.status) {
       refreshTree();
     } else {
-      // Text-only change → update just this node's label
-      updateScriptNodeLabel(activeScript);
+      updateScriptNodeLabel(activeAfter);
     }
   } catch (err) {
     console.error(err);
@@ -1108,15 +1116,9 @@ function updateScriptNodeLabel(script) {
 }
 
 async function linkScriptToVideo(videoId) {
-  if (!activeScript) return;
+  if (!getActiveScript()) return;
   try {
-    const res = await fetch(`${API}/scripts/${activeScript.id}/link`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ video_id: videoId || null })
-    });
-    if (!res.ok) throw new Error('Fehler');
-    activeScript.video_id = videoId || null;
+    await store.actions.updateScript(getActiveScript().id, { video_id: videoId || null });
     refreshTree();
   } catch (err) {
     console.error(err);
@@ -1148,40 +1150,40 @@ function setupScriptsNav() {
 
 // ─── Approve & Move to Script (research → script) ──────────────────────────
 function getLinkedVideoStatus() {
-  if (!activeScript || !activeScript.video_id) return null;
+  if (!getActiveScript() || !getActiveScript().video_id) return null;
   if (!window._allVideos) return null;
-  const v = window._allVideos.find(x => x.id === activeScript.video_id);
+  const v = window._allVideos.find(x => x.id === getActiveScript().video_id);
   return v ? v.status : null;
 }
 
 function renderApproveButton() {
   const linkedStatus = getLinkedVideoStatus();
-  if (!activeScript || !activeScript.video_id || linkedStatus !== 'research') {
+  if (!getActiveScript() || !getActiveScript().video_id || linkedStatus !== 'research') {
     return '';
   }
-  const videoTitle = getVideoTitle(activeScript.video_id) || 'verlinktes Video';
+  const videoTitle = getVideoTitle(getActiveScript().video_id) || 'verlinktes Video';
   return `<button class="btn btn--approve" onclick="approveAndMoveToScript()" title="Video ${escapeHtml(videoTitle)} von 'research' auf 'script' moven — signalisiert: Skript ist freigegeben für die Aufnahme-Phase">🟢 Approve & move to script</button>`;
 }
 
 async function approveAndMoveToScript() {
-  if (!activeScript || !activeScript.video_id) return;
+  if (!getActiveScript() || !getActiveScript().video_id) return;
   const linkedStatus = getLinkedVideoStatus();
   if (linkedStatus !== 'research') {
     showToast?.(`Video ist bereits im Status '${linkedStatus}', kein Move nötig.`) ||
       alert(`Video ist bereits im Status '${linkedStatus}', kein Move nötig.`);
     return;
   }
-  if (!confirm(`Video "${getVideoTitle(activeScript.video_id)}" auf Status 'script' moven?\n\nDas signalisiert: Skript ist freigegeben für die Aufnahme-Phase.`)) return;
+  if (!confirm(`Video "${getVideoTitle(getActiveScript().video_id)}" auf Status 'script' moven?\n\nDas signalisiert: Skript ist freigegeben für die Aufnahme-Phase.`)) return;
 
   try {
-    const res = await fetch(`${API}/videos/${activeScript.video_id}`, {
+    const res = await fetch(`${API}/videos/${getActiveScript().video_id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'script' })
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     // Update local state
-    const v = window._allVideos.find(x => x.id === activeScript.video_id);
+    const v = window._allVideos.find(x => x.id === getActiveScript().video_id);
     if (v) v.status = 'script';
     showToast?.('✅ Video-Status auf "script" gesetzt.') ||
       alert('✅ Video-Status auf "script" gesetzt.');

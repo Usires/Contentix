@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **📦 Central State Store (ADR-001 Phase 1)**: New `frontend/store.js`
+  implementing `createStore(state)` with `select`, `subscribe`,
+  `setState`, and a synchronous action set (`setActiveScript`,
+  `setActiveView`). Async action set: `loadScripts`, `createScript`,
+  `updateScript`, `deleteScript` — all with optimistic updates, server
+  reconciliation, and rollback on error. Cancellation tokens for
+  `loadScripts` so rapid successive calls cancel earlier in-flight
+  requests. `select()` returns deep-cloned snapshots (read-only
+  contract). 20/20 unit tests green in `tests/store.test.js`. Legacy
+  API (`getAllCards` / `loadAllCards` / `setAllCards` /
+  `onAllCardsChange`) kept as deprecated wrapper for kanban.js /
+  calendar.js / app.js until Phase 3 migration.
+- **🧪 Store unit tests**: `tests/store.test.js` — 20 specs covering
+  seed isolation, snapshot semantics, subscriber exception isolation,
+  unsubscribe-during-notification, async cancellation, and full
+  optimistic-update + rollback round-trips for create/update/delete.
+
+### Changed
+- **🔌 scripts.js migrated to store (ADR-001 Phase 2)**: All `let
+  allScripts` / `let activeScript` removed. Reads via
+  `getAllScripts()` / `getActiveScript()` (thin store.select wrappers).
+  Writes via `store.actions.{loadScripts, createScript, updateScript,
+  deleteScript, setActiveScript}`. Subscribe-with-scripts-hash to
+  avoid tearing down jsTreeInstance on ui-only state changes
+  (activeScriptId toggles alone must NOT rebuild the tree — that was
+  causing jstree's internal handler to call triggerHandler() on a
+  destroyed instance, throwing in the console). Subscription guards:
+  only render if the scripts container is visible AND the scripts
+  data hash actually changed.
+- **📡 PUT/POST /api/scripts return full record**: Was `{status:'ok'}`.
+  Now returns the full updated/created record (with `tags` parsed from
+  JSON). Required for store optimistic-update reconciliation. (Bug fix:
+  the old stub-return was causing the store to overwrite the full
+  record with `{status:'ok'}` after every update — silent corruption
+  masked by every consumer re-fetching from the server.)
+- **🔧 kanban.js bug fix (pre-existing, surfaced during Phase 2)**: The
+  `renderBoard()` function referenced an undeclared `allCards` global,
+  causing `ReferenceError: allCards is not defined` every time the
+  Kanban view rendered. Replaced with `const allCards = getAllCards()
+  || []` at the top of `renderBoard()`. Same fix applied to two other
+  references in `archiveCard` and `restoreCard`. Kanban view now
+  renders cleanly.
+
 ### Refactored
 - **🔁 Script-Sort-Dedup (R2, WEAVE #102)**: Identische `.sort((a,b) =>
   (a.position||0) - (b.position||0) || a.title.localeCompare(b.title))`-Logik

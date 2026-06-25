@@ -75,6 +75,7 @@ function renderBoard() {
   if (!board) return;
 
   const MAX_VISIBLE = 10;
+  const allCards = getAllCards() || [];
 
   board.innerHTML = COLUMNS.map(col => {
     const colCards = allCards.filter(c => STATUS_MAP[c.status] === col.id);
@@ -426,7 +427,7 @@ function escapeHtml(s) {
 }
 
 async function duplicateCard(cardId) {
-  const card = allCards.find(c => c.id === cardId);
+  const card = getAllCards().find(c => c.id === cardId);
   if (!card) return;
   try {
     const res = await fetch(`${API}/videos`, {
@@ -596,7 +597,7 @@ function openCardModal(cardId = null, defaultColumn = 'ideas', prefillDate = nul
   if (slg) slg.style.display = 'none';
 
   if (cardId) {
-    const card = allCards.find(c => c.id === cardId);
+    const card = getAllCards().find(c => c.id === cardId);
     if (card) {
       form.title.value = card.title || '';
       form.notes.value = card.notes || '';

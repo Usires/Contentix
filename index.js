@@ -337,7 +337,11 @@ app.post('/api/scripts', (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id, title, slug, folder, status, content, video_id, video_format, JSON.stringify(tags), position, now, now
     );
-    res.json({ id, status: 'ok' });
+    // Return the full record so the frontend store's createScript action
+    // can replace its optimistic insert with the server-side truth.
+    // (ADR-001 + Phase 2 migration, 2026-06-25)
+    const created = get('SELECT * FROM scripts WHERE id = ?', id);
+    res.json({ ...created, tags: created.tags ? JSON.parse(created.tags) : [] });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -361,7 +365,12 @@ app.put('/api/scripts/:id', (req, res) => {
     updates.push('updated_at = ?'); params.push(new Date().toISOString());
     params.push(id);
     run(`UPDATE scripts SET ${updates.join(', ')} WHERE id = ?`, ...params);
-    res.json({ status: 'ok' });
+    // Return the full updated record so optimistic-update flows in the
+    // frontend store can reconcile without a follow-up GET. Previously
+    // this returned `{status: 'ok'}`, which caused the store to overwrite
+    // the full record with that stub. (ADR-001 + Phase 2 migration, 2026-06-25)
+    const updated = get('SELECT * FROM scripts WHERE id = ?', id);
+    res.json({ ...updated, tags: updated.tags ? JSON.parse(updated.tags) : [] });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

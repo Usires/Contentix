@@ -442,3 +442,140 @@ I'd started writing code.
 
 By Nix 🐧 & Dirk, 2026. *"Centralize state, decentralize everything
 else."*
+
+---
+
+## 2026-06-25 — ADR-001 Phase 1 + 2: Store + scripts.js migration
+
+Phased rollout of the state store, as laid out in ADR-001. Phases 1 and
+2 in one push, since Phase 1 is meaningless without Phase 2 proving the
+API works against a real consumer.
+
+### Phase 1 — store.js + 20 unit tests
+
+Wrote `frontend/store.js` from scratch (the old file was a 33-line stub).
+The new file is ~370 lines, but most of that is JSDoc and a single
+~120-line `createStore` function. The actual surface is small:
+
+```
+store.select(selector)         // deep-cloned snapshot
+store.subscribe(listener)      // returns unsub()
+store.setState(producer)       // no-op detection built in
+store.actions.{loadScripts,
+              createScript,
+              updateScript,
+              deleteScript,
+              setActiveScript,
+              setActiveView}
+```
+
+Wrote `tests/store.test.js` with 20 specs. All green on the first run
+except four:
+
+1. **`mutating a snapshot returned by select does not affect the store`**
+   failed because my `select()` was returning the live state object,
+   not a clone. The doc comment claimed "READ-ONLY SNAPSHOTS" but the
+   code didn't deliver. Fixed by adding `JSON.parse(JSON.stringify(state))`
+   in `select()`. Test is now the contract enforcement.
+2. **Three mock-fetch tests** were failing because I was mocking
+   `globalThis.fetch` but the store runs inside a `vm` sandbox with its
+   own `fetch` reference. Added a `withMockFetch()` helper that swaps
+   `sandbox.fetch` directly. This is a pattern worth remembering for
+   future vm-based tests.
+3. **One `deepStrictEqual([], [])`** failed for reasons I didn't bother
+   investigating — switched to `assert.equal(arr.length, 0)` which is
+   what the test actually meant.
+
+### Phase 2 — scripts.js migration
+
+This was the high-risk part. 45 references to `allScripts` or
+`activeScript` across 1195 lines. My strategy:
+
+1. `sed` mass-rename of `allScripts` → `getAllScripts()` and
+   `activeScript` → `getActiveScript()` (with `\b` word boundaries so
+   we don't touch substrings).
+2. Add `getAllScripts()` and `getActiveScript()` as thin `store.select`
+   wrappers at the top of the file.
+3. Surgically replace each *write* site (`activeScript = x`,
+   `script.title = newText`, `allScripts.push(...)`) with a call to the
+   appropriate `store.actions.*` function.
+4. Add a store subscription that re-renders `renderScriptsView()` on
+   state change.
+
+Caught a real, invisible bug while doing this:
+
+**PUT /api/scripts/:id was returning `{status: 'ok'}` — not the updated
+record.** My store's `updateScript` action did
+`s.scripts[idx] = updated;` after the PUT, expecting `updated` to be
+the new record. Instead it was the stub, and the store was *silently
+overwriting the full script with `{status: 'ok'}`*. Every consumer that
+re-fetched from the server immediately after wouldn't notice, but
+consumers that trusted the store would see the corrupted record.
+
+Fixed by changing the PUT (and POST) handlers to return the full
+updated/created record. Bug-fix and refactor committed together because
+they're inseparable — the new store migration is what surfaced the API
+bug, and the API fix is what makes the store migration work.
+
+### The triggerHandler incident
+
+After Phase 2, browser smoke tests revealed a `Cannot read properties
+of null (reading 'triggerHandler')` error every time I clicked a
+script node in the tree. The stack trace pointed into jstree's
+minified `trigger` function. Took me three iterations to find:
+
+- **My store subscription was firing on ui-only changes.** When
+  `setActiveScript(id)` ran, it changed `state.ui.activeScriptId`. My
+  subscriber saw a state change, called `renderScriptsView()`, which
+  rebuilt the entire jsTreeInstance. But the click that triggered
+  `setActiveScript` was still in jstree's internal event handler queue.
+  jstree's next internal call to `triggerHandler` then tried to call
+  on the now-destroyed `$tree` and crashed.
+- **Fix:** subscribe only re-renders when the *scripts data hash*
+  changes. UI state changes (activeScriptId, activeView) don't trigger
+  rebuilds. The active script is read separately via `getActiveScript()`
+  at render time, so the tree's `state.selected` field still reflects
+  the active script on next user-driven rebuild.
+
+This was a **subtle bug that I introduced**. The pre-refactor code
+didn't have it because there was no store subscription — `renderScriptsView`
+was only called explicitly from event handlers, so the rebuild never
+happened mid-click. The store migration changed the timing, and the
+bug appeared.
+
+**Lesson:** when migrating to a reactive store, expect some code paths
+to be timing-sensitive in ways they weren't before. Test in the actual
+browser, not just with unit tests — the unit tests will all pass while
+a real click triggers a regression that only happens in the wild.
+
+### The bonus bug
+
+While Phase-2-testing, I noticed `kanban.js` throwing `allCards is not
+defined` on every Kanban-view render. This bug existed *before* my
+refactor — the code referenced an undeclared `allCards` global that
+was never set. Phase 2's tests just made it more visible because the
+browser console was now cleaner overall. Fixed in three lines. Filed
+this as a separate entry in the changelog.
+
+### Counts
+
+- `frontend/store.js`: 33 → 374 lines (+340)
+- `frontend/scripts.js`: 1195 → 1198 lines (+3 net — many `getAllScripts()`
+  calls collapse the mass-rename, but the `initScripts` rewrite and
+  legacy-API-still-works comment block add bulk)
+- `tests/store.test.js`: 0 → 388 lines (new)
+- `tests/sort-comparator.test.js`: 0 → 269 lines (was already there)
+- `index.js`: PUT/POST now return full records (+8 lines)
+
+### What's next (Phase 3, when Dirk says go)
+
+- Migrate `kanban.js` to use `store.actions.loadVideos()` etc. instead
+  of the legacy `loadAllCards()` / `setAllCards()`.
+- Migrate `calendar.js` and `history.js` similarly.
+- Migrate `app.js` for the same reason.
+- Once all views are on the store, **delete the legacy API wrapper**
+  from `store.js`.
+- Then Phase 4 (Undo/Redo on top of the action log) becomes a real
+  conversation.
+
+By Nix 🐧 & Dirk, 2026. *"Centralize state. Then ship."*
