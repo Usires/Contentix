@@ -69,9 +69,15 @@ async function renderCalendar() {
 
   // Subscribe once to videos data so the grid re-renders on updates.
   ensureCalendarSubscribed();
-  // Ensure videos are loaded for date filtering.
-  try {
-    await store.actions.loadVideos();
+  // Skip the load if the store already has videos from a previous view
+  // (kanban, app.js palette, etc.). This is the post-Phase-3 hot path:
+  // we only pay the network round-trip on the *first* view that needs
+  // videos, not every time we switch to calendar.
+  if (store.select(s => s.videos.length) === 0) {
+    try {
+      await store.actions.loadVideos();
+    } catch (_) {}
+  }
   } catch (_) {}
 
   container.innerHTML = `
