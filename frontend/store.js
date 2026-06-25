@@ -191,7 +191,7 @@ function createStore(initialState) {
     async createScript(input) {
       const optimistic = {
         ...input,
-        id: `optimistic-${crypto.randomUUID()}`,
+        id: `optimistic-${uuidv4()}`,
         position: Date.now(),
         created_at: new Date().toISOString(),
         __optimistic: true
@@ -422,7 +422,7 @@ function createStore(initialState) {
     async createVideo(input) {
       const optimistic = {
         ...input,
-        id: `optimistic-${crypto.randomUUID()}`,
+        id: `optimistic-${uuidv4()}`,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         __optimistic: true

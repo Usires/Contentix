@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **🐛 `crypto.randomUUID is not a function` when creating a new script/video**:
+  `crypto.randomUUID()` is only available in secure contexts (HTTPS or
+  `localhost`). Contentix runs as a plain-HTTP LAN app
+  (`http://asbach-games.fritz.box:PORT`), where `window.crypto` exists
+  but `randomUUID` is undefined. Symptom: clicking "Speichern" on the
+  new-script modal threw and the record never persisted. Fix: added a tiny
+  `uuidv4()` polyfill in `utils.js` (uses `crypto.getRandomValues`
+  which IS available in insecure contexts) and replaced the two
+  `crypto.randomUUID()` call sites in `store.js` (`createScript`,
+  `createVideo`) with `uuidv4()`. Also swapped the `<script>` load
+  order in `index.html` so `utils.js` loads before `store.js` — the
+  polyfill must be defined before any consumer references it.
+
 ### Added
 - **📦 Central State Store (ADR-001 Phase 1)**: New `frontend/store.js`
   implementing `createStore(state)` with `select`, `subscribe`,

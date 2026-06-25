@@ -25,12 +25,17 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 // --- Load the store module in a sandbox ---------------------------------
+// store.js calls uuidv4() (defined in utils.js) for createScript/createVideo,
+// so we load utils.js first to expose uuidv4 in the sandbox.
 
+const utilsPath = path.join(__dirname, '..', 'frontend', 'utils.js');
+const utilsSrc = fs.readFileSync(utilsPath, 'utf8');
 const storePath = path.join(__dirname, '..', 'frontend', 'store.js');
 const storeSrc = fs.readFileSync(storePath, 'utf8');
 
 const sandbox = { console, structuredClone, JSON, crypto, fetch, Promise, setTimeout };
 vm.createContext(sandbox);
+vm.runInContext(utilsSrc, sandbox);
 vm.runInContext(storeSrc, sandbox);
 
 // Tests need to mock the fetch that the store *inside the sandbox* uses.
