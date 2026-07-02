@@ -690,6 +690,23 @@ app.get('/api/vidiq/balance-live', async (req, res) => {
     // (bare balance object, or { balance: {...} }, or { type, totalCredits, ... }).
     const balance = parsed.balance && typeof parsed.balance === 'object' ? parsed.balance : parsed;
 
+    // Guard against clobbering good data with parse-fail objects. vidIQ
+    // outage returns JSON envelopes that parse to `{result:{content:[...]}}`
+    // or similar; after normalization they have no numeric balance fields
+    // and are not safe to write into the cache.
+    function isValidBalance(b) {
+      return b && typeof b === 'object' && (
+        typeof b.renewableCredits === 'number' ||
+        typeof b.addOnCredits === 'number' ||
+        typeof b.maxRenewableCredits === 'number'
+      );
+    }
+    if (!isValidBalance(balance)) {
+      log.warn(`[vidIQ] balance-live: ungültiges Objekt erhalten — kein Cache-Update. Wert: ${JSON.stringify(balance)}`);
+      res.status(502).json({ error: 'vidIQ balance missing credit fields', received: balance, healed: false });
+      return;
+    }
+
     // Self-heal: merge into existing cache blob so /api/vidiq/stats picks it up.
     const existingRows = getAll('SELECT data FROM vidiq_cache WHERE channel_id = ?', CHANNEL_ID);
     const merged = existingRows.length > 0 ? JSON.parse(existingRows[0].data) : {};
@@ -980,10 +997,30 @@ async function runVidiqRefresh(jobId) {
 
     // Merge with any existing data so we don't clobber sidecar keys like
     // `_watchtime` (written by Step 6 of the refresh).
+    //
+    // `isValidBalance()`: vidIQ sometimes returns a parseable JSON envelope
+    // where the actual balance fields are missing (e.g. temporary API outage
+    // returns `{result:{...error...}}` and parseVidiqResponse yields `null`,
+    // which defaulted to `{}`). Writing `{}` to the cache would clobber a
+    // previously-good balance with an empty object and strand the UI on
+    // "— nicht verfügbar" until a future refresh succeeds. To avoid that,
+    // we only overwrite the cached balance when the new value has at least
+    // one numeric credit field.
+    function isValidBalance(b) {
+      return b && typeof b === 'object' && (
+        typeof b.renewableCredits === 'number' ||
+        typeof b.addOnCredits === 'number' ||
+        typeof b.maxRenewableCredits === 'number'
+      );
+    }
     const existingRows = getAll('SELECT data FROM vidiq_cache WHERE channel_id = ?', CHANNEL_ID);
     const merged = existingRows.length > 0 ? JSON.parse(existingRows[0].data) : {};
     merged.stats = stats;
-    merged.balance = balance;
+    if (isValidBalance(balance)) {
+      merged.balance = balance;
+    } else {
+      log.warn(`[vidIQ] Step 3 (balance) lieferte ungültiges/parse-fail-Objekt — altes balance behalten. Wert: ${JSON.stringify(balance)}`);
+    }
     merged.channelId = CHANNEL_ID;
     merged.latestVideo = latestVideo;
     run('INSERT OR REPLACE INTO vidiq_cache (channel_id, data, fetched_at) VALUES (?, ?, datetime("now"))', CHANNEL_ID, JSON.stringify(merged));

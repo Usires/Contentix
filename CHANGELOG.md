@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **🐛 Refresh overwrote good cache `balance` with `{}` when vidIQ API was down**:
+  when `vidiq_balance` returned an envelope like
+  `{result:{content:[{type:"text", text:"Something went wrong..."}]}}`,
+  `parseVidiqResponse` returned `null`, the default `balance = {}` was
+  merged into the cache, clobbering any previously-valid balance with
+  empty data. Symptom: even after a refresh succeeded for stats/videos,
+  the credits display stayed at "—" instead of recovering as soon as
+  vidIQ returned to normal. Fix: only write `balance` to the cache when
+  the new object actually has at least one numeric credit field
+  (`renewableCredits` / `addOnCredits` / `maxRenewableCredits`). Same
+  guard added to `GET /api/vidiq/balance-live` so the live escape-hatch
+  also refuses to clobber good data when vidIQ returns a non-balance
+  envelope.
 - **🐛 Credits display showed "0" instead of "—" when vidIQ was unreachable**:
   `loadVidiqCredits()` read the cached `balance` blob, and if it was
   empty (`{}`) — e.g. after a parse failure or while vidIQ is down —
