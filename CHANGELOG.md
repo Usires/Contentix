@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **🐛 Credits display showed "0" instead of "—" when vidIQ was unreachable**:
+  `loadVidiqCredits()` read the cached `balance` blob, and if it was
+  empty (`{}`) — e.g. after a parse failure or while vidIQ is down —
+  it fell through to `renewableCredits ?? 0 = 0`, making the badge
+  show `💳 0` in red. User couldn't tell "no credits" from "I
+  don't know". Fix: if the balance object has no recognizable fields
+  (`renewableCredits`, `addOnCredits`, `maxRenewableCredits`), try one
+  `/api/vidiq/balance-live` read before displaying. Only show "— nicht
+  verfügbar" if that also fails.
+
+### Fixed
 - **🐛 vidIQ refresh trapped in "0-Credit-Loop" on stale/empty cache**:
   the pre-flight gate in `refreshVidiq()` reads the cached balance from
   `/api/vidiq/stats` and bails with `✗ vidIQ-Credits leer — Reset …`

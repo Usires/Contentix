@@ -576,13 +576,42 @@ async function loadWatchtime() {
 async function loadVidiqCredits() {
   const wrap = document.getElementById('vidiqCredits');
   if (!wrap) return;
+
+  // Reads the cached balance from /api/vidiq/stats. If the balance blob is
+  // empty (no renewableCredits/addOnCredits fields — e.g. after a parse failure
+  // or while vidIQ is down), we fall back to /api/vidiq/balance-live once.
+  // Only if that also fails do we show "— nicht verfügbar" instead of "0".
+  async function fetchBalance(live = false) {
+    const url = live ? `${API}/vidiq/balance-live` : `${API}/vidiq/stats`;
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const d = await r.json();
+    // /vidiq/stats returns { balance: {...} }; /balance-live returns { balance: {...} }
+    const bal = (d && d.balance && typeof d.balance === 'object') ? d.balance : null;
+    if (!bal) return null;
+    // Must have at least one of the three balance fields to be considered valid.
+    if (bal.renewableCredits == null && bal.addOnCredits == null && bal.maxRenewableCredits == null) {
+      return null;
+    }
+    return bal;
+  }
+
   try {
-    const r = await fetch(`${API}/vidiq/stats`);
-    if (!r.ok) throw new Error(`API ${r.status}`);
-    const data = await r.json();
-    const bal = data.balance || {};
-    // Field semantics: total = renewable + addOn; renewableResetsAt tells us when
-    // the bucket refills. We expose both so Dirk doesn't get surprised.
+    let bal = await fetchBalance(false);
+    // Cache empty or vidIQ still down → try live read before showing "0".
+    if (!bal) {
+      try { bal = await fetchBalance(true); } catch (_) { /* keep null */ }
+    }
+
+    if (!bal) {
+      // Balance genuinely unavailable — show "—" not "0" (0 implies "no credits",
+      // which is wrong when we just couldn't reach vidIQ).
+      wrap.querySelector('.vidiq-credits__value').textContent = '—';
+      wrap.querySelector('.vidiq-credits__hint').textContent = 'nicht verfügbar';
+      wrap.classList.remove('vidiq-credits--low', 'vidiq-credits--zero');
+      return;
+    }
+
     const renewable = bal.renewableCredits ?? 0;
     const addOn = bal.addOnCredits ?? 0;
     const maxRenewable = bal.maxRenewableCredits ?? 0;
@@ -601,12 +630,12 @@ async function loadVidiqCredits() {
       `Renewable: ${fmt(renewable)} / ${fmt(maxRenewable)}${resetStr ? ` (Reset ${resetStr})` : ''}\n` +
       `Add-on (Bonus): ${fmt(addOn)}\n` +
       `Gesamt: ${fmt(total)}`;
-    // Color states: <20% amber, 0 red, else neutral.
     wrap.classList.toggle('vidiq-credits--low', maxRenewable > 0 && total < maxRenewable * 0.2);
     wrap.classList.toggle('vidiq-credits--zero', total === 0);
   } catch (e) {
     wrap.querySelector('.vidiq-credits__value').textContent = '—';
     wrap.querySelector('.vidiq-credits__hint').textContent = 'nicht erreichbar';
+    wrap.classList.remove('vidiq-credits--low', 'vidiq-credits--zero');
   }
 }
 
