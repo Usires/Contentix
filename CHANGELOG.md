@@ -8,6 +8,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **🐛 vidIQ refresh trapped in "0-Credit-Loop" on stale/empty cache**:
+  the pre-flight gate in `refreshVidiq()` reads the cached balance from
+  `/api/vidiq/stats` and bails with `✗ vidIQ-Credits leer — Reset …`
+  if `total ≤ 0`. But if the cached `balance` blob is empty (`{}` from a
+  previous parse failure) the gate bails **forever** because the
+  refresh job — the only thing that ever writes a fresh `balance` —
+  is the thing being refused. Symptoms: the UI sticks at "Credits leer"
+  even when vidIQ has credits again, the button has to be coaxed back
+  to life manually.
+  Fix:
+  1. **Backend**: new `GET /api/vidiq/balance-live` — bypasses cache,
+     calls `vidiq_balance` directly, merges the result back into
+     `vidiq_cache.data.balance`. Self-heals the cache for any later
+     pre-flight that doesn't go live.
+  2. **Frontend**: `refreshVidiq()` pre-flight now treats an empty
+     `balance` blob the same as `total ≤ 0` and triggers one live
+     read before deciding to hard-stop. If the live call fails (e.g.
+     vidIQ API hiccup), the gate falls through to a visible warning
+     (`⚠ Credit-Stand nicht abrufbar (vidIQ-Fehler) — Refresh startet trotzdem`) and lets the refresh run anyway — the user can
+     see the real failure inside Step 3 instead of being stuck.
+
+## [0.13.1] — 2026-07-02
+
+### Added
+- **📊 Step-by-step vidIQ refresh progress in the UI**: every `updateProgress()`
+  call now writes a human-readable `current_step` label (e.g. `📊 Kanal-Statistiken
+  werden geladen…`, `⏱️  Watchtime wird geladen… (5 Credits)`,
+  `🔄 Video 17/31 wird geladen… (1 Credit)`). The frontend's
+  `refreshVidiq()` poll reads `job.currentStep` and shows it instead of
+  the old generic `Lade Daten… (0%)` placeholder. Added a new
+  `current_step TEXT` column to `vidiq_refresh_jobs` via best-effort
+  `ALTER TABLE` (idempotent for fresh DBs).
+- **💳 vidIQ credit balance always visible under the refresh button**:
+  new `<div id="vidiqCredits">` block shows `💳 96 / 2,000  ·  Reset 01.07. 10:25`
+  with a hover tooltip breaking out renewable vs. add-on buckets. Color
+  states: amber when below 20% of the renewable cap, red when zero. After
+  a successful refresh the UI shows `✓ Fertig! · 14 Credits verbraucht`
+  (delta between pre- and post-refresh balance).
+- **🛑 Pre-flight credit gate on refresh**: `refreshVidiq()` now snapshots
+  the balance from `/api/vidiq/stats` *before* firing the POST. If
+  `total ≤ 0`, the refresh is **refused entirely** with
+  `✗ vidIQ-Credits leer — Reset 01.07. 10:25` (no MCP call wasted, button
+  switches to `⟳ Retry`). Below `WARN_LOW_CREDITS = 30`, a yellow
+  `⚠ Nur X Credits übrig — Refresh startet trotzdem` notice flashes for
+  ~800ms before the polling kicks in, so the user sees the warning before
+  the step-label takes over. Threshold `REFRESH_MIN_CREDITS = 10` is
+  reserved for a future server-side gate (not enforced client-side yet
+  because the balance check is a free endpoint call).
+
+### Fixed
+- **🐛 vidIQ refresh — `started_at` always NULL in job table**: the v0.10
+  `started_at`, so every job row ended up with `started_at = NULL`. This
+  broke `ORDER BY started_at DESC` (NULLs sort first or last depending on
+  the SQLite build) and made it look like there hadn't been any refreshes
+  since the column was added. Fix: schema now declares
+  `started_at TEXT DEFAULT (datetime('now'))`; existing rows are
+  backfilled with `COALESCE(finished_at, datetime('now'))`; new jobs also
+  write `started_at` explicitly in the POST handler as a belt-and-braces
+  measure.
 - **🐛 `crypto.randomUUID is not a function` when creating a new script/video**:
   `crypto.randomUUID()` is only available in secure contexts (HTTPS or
   `localhost`). Contentix runs as a plain-HTTP LAN app

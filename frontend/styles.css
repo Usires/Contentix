@@ -1179,6 +1179,38 @@ body.modal-open {
 .vidiq-refresh-status--error { color: #e87a7a; }
 .vidiq-refresh-status--done { color: #7ae8a0; }
 
+/* vidIQ credits display — sits below the refresh button. Subtle by default,
+   amber when balance drops below 20% of the renewable cap, red when zero. */
+.vidiq-credits {
+  margin-top: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-on-dark-secondary);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: help;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+.vidiq-credits:hover { background: rgba(255, 255, 255, 0.07); }
+.vidiq-credits__icon { font-size: 12px; }
+.vidiq-credits__value { font-weight: 600; color: var(--text-on-dark); }
+.vidiq-credits__hint { margin-left: auto; opacity: 0.7; font-size: 10px; }
+.vidiq-credits--low {
+  background: rgba(255, 180, 50, 0.08);
+  border-color: rgba(255, 180, 50, 0.25);
+}
+.vidiq-credits--low .vidiq-credits__value { color: #ffb432; }
+.vidiq-credits--zero {
+  background: rgba(232, 122, 122, 0.10);
+  border-color: rgba(232, 122, 122, 0.30);
+}
+.vidiq-credits--zero .vidiq-credits__value { color: #e87a7a; }
+
 /* Settings View */
 .settings-panel {
   padding: 20px;

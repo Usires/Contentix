@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadChannelStats();
   loadExpeditionsList();
   document.getElementById('vidiqRefreshBtn')?.addEventListener('click', refreshVidiq);
+  loadVidiqCredits(); // Initial fetch so the user always sees current balance
   setVidiqIdleLabel(); // Show last sync time on page load
   // Load version from API
   fetch(`${API}/health`)
@@ -156,6 +157,18 @@ function formatRelativeTime(date) {
 
 let vidiqCancelToken = null;
 
+// Snapshot of credit balance taken right before firing a refresh, so we can
+// show the delta (e.g. "−14 Credits verbraucht") once the job finishes.
+let vidiqCreditsBeforeRefresh = null;
+
+// Pre-flight credit check thresholds.
+// REFRESH_MIN_CREDITS: below this, refuse to start the refresh entirely
+// (the MCP call would just fail and burn the user's time). 7 = enough for the
+// 6 init steps + a watchtime, but tight; 10 gives breathing room for retries.
+// WARN_LOW_CREDITS: warn but proceed — user might want to refresh anyway.
+const REFRESH_MIN_CREDITS = 10;
+const WARN_LOW_CREDITS = 30;
+
 async function refreshVidiq() {
   const btn = document.getElementById('vidiqRefreshBtn');
   const status = document.getElementById('vidiqRefreshStatus');
@@ -174,10 +187,81 @@ async function refreshVidiq() {
     document.getElementById('logbuchVideos').textContent = data.videoCount ?? '—';
   }
 
-  setState('Starte vidIQ Refresh...', 'vidiq-refresh-status--loading', '⟳ Abbruch');
+  // Status text + button label for the very first tick. Will be replaced
+// immediately by the pre-flight check below if credits are empty.
+setState('Prüfe vidIQ-Credits…', 'vidiq-refresh-status--loading', '⟳ vidIQ Refresh');
   vidiqCancelToken = new AbortController();
 
   try {
+    // Snapshot credit balance so we can show "X Credits verbraucht" on done.
+    // Also gate the refresh on REFRESH_MIN_CREDITS — the MCP call would
+    // just fail and waste ~30s otherwise.
+    //
+    // A cached `balance: {}` (e.g. from a previous refresh where the balance
+    // parse failed) used to trap us in a 0-credit loop because the gate
+    // bailed forever on the stale blob. The fix: when the cached balance is
+    // missing/empty OR zero, force a live /api/vidiq/balance-live read which
+    // (a) costs 0 credits per the MCP pricing and (b) self-heals the cache.
+    async function readBalance({ live } = {}) {
+      const url = live ? `${API}/vidiq/balance-live` : `${API}/vidiq/stats`;
+      const r = await fetch(url);
+      if (!r.ok) return null;
+      const d = await r.json();
+      return (d && d.balance && typeof d.balance === 'object' && Object.keys(d.balance).length > 0)
+        ? d.balance
+        : null;
+    }
+
+    function totalFromBalance(b) {
+      if (!b) return null;
+      return (b.renewableCredits ?? 0) + (b.addOnCredits ?? 0);
+    }
+
+    try {
+      let balance = await readBalance();
+      let liveAttempted = false;
+      let liveFailed = false;
+      // If the cache read came back empty or zero, attempt one live read before
+      // deciding to hard-stop. This is the "0-credit loop" escape hatch.
+      if (!balance || (totalFromBalance(balance) ?? 0) <= 0) {
+        liveAttempted = true;
+        try {
+          const live = await readBalance({ live: true });
+          if (live) balance = live;
+          else liveFailed = true;
+        } catch (_) {
+          liveFailed = true;
+        }
+      }
+      if (balance) {
+        vidiqCreditsBeforeRefresh = totalFromBalance(balance);
+        // Hard stop: no credits at all → don't even try.
+        if (vidiqCreditsBeforeRefresh <= 0) {
+          const resetAt = balance.renewableResetsAt ? new Date(balance.renewableResetsAt) : null;
+          const resetStr = resetAt
+            ? resetAt.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+            : 'unbekannt';
+          setState(`✗ vidIQ-Credits leer — Reset ${resetStr}`, 'vidiq-refresh-status--error', '⟳ Retry');
+          btn.disabled = false;
+          return;
+        }
+        // Soft warn: low credits → show a yellow notice but still proceed.
+        // The status line stays for one tick so the user sees it before
+        // the first poll overwrites it with the step label.
+        if (vidiqCreditsBeforeRefresh < WARN_LOW_CREDITS) {
+          setState(`⚠ Nur ${vidiqCreditsBeforeRefresh} Credits übrig — Refresh startet trotzdem`, 'vidiq-refresh-status--loading', '⟳ Abbruch');
+          await new Promise(r => setTimeout(r, 800));
+        }
+      } else if (liveAttempted && liveFailed) {
+        // We tried a live balance read to escape a stale/empty cache but the
+        // vidIQ MCP itself failed. Don't block — let the refresh run and let
+        // the user see the actual error inside Step 3. But make the situation
+        // visible so a silent retry isn't possible.
+        setState('⚠ Credit-Stand nicht abrufbar (vidIQ-Fehler) — Refresh startet trotzdem', 'vidiq-refresh-status--loading', '⟳ Abbruch');
+        await new Promise(r => setTimeout(r, 1200));
+      }
+    } catch (_) { /* not critical — proceed without gate */ }
+
     // Fire refresh job
     const r = await fetch('/api/vidiq/refresh', {
       method: 'POST',
@@ -203,10 +287,23 @@ async function refreshVidiq() {
         if (!sr.ok) return;
         const job = await sr.json();
         const pct = job.total > 0 ? Math.round((job.progress / job.total) * 100) : 0;
-        setState(`Daten laden... (${pct}%)`, 'vidiq-refresh-status--loading', '⟳ Abbrechen');
+        // Prefer the human-readable step label from the server (e.g. "📊 Kanal-Statistiken werden geladen…");
+        // fall back to a generic progress message for very early polls where currentStep isn't set yet.
+        const label = job.currentStep || `Daten laden… (${pct}%)`;
+        setState(`${label} · ${pct}%`, 'vidiq-refresh-status--loading', '⟳ Abbrechen');
 
         if (job.status === 'done') {
-          setState('✓ Fertig!', 'vidiq-refresh-status--done', '✓');
+          // After a refresh the credit balance is fresh — show the delta
+          // ("✓ Fertig! — X Credits verbraucht") so the user knows the cost.
+          if (job.result && job.result.balance && vidiqCreditsBeforeRefresh !== null) {
+            const newTotal = (job.result.balance.renewableCredits || 0) + (job.result.balance.addOnCredits || 0);
+            const delta = vidiqCreditsBeforeRefresh - newTotal;
+            const costStr = delta > 0 ? ` · ${delta} Credits verbraucht` : '';
+            setState(`✓ Fertig!${costStr}`, 'vidiq-refresh-status--done', '✓');
+            vidiqCreditsBeforeRefresh = null;
+          } else {
+            setState('✓ Fertig!', 'vidiq-refresh-status--done', '✓');
+          }
           if (job.result) updateSidebarStats(job.result);
           if (typeof pulseSidebarStats === 'function') pulseSidebarStats();
           setTimeout(() => {
@@ -217,6 +314,8 @@ async function refreshVidiq() {
             // of the refresh). Pull it from its own endpoint so the sidebar
             // shows the fresh value immediately.
             loadWatchtime();
+            // Refresh the credit balance display with the post-refresh value.
+            loadVidiqCredits();
             btn.textContent = '⟳ vidIQ Refresh';
             btn.disabled = false;
             contentixReload();
@@ -467,6 +566,47 @@ async function loadWatchtime() {
       : `Frisch geladen · ${w.windowDays}-Tage-Fenster · ${w.avgViewPercentage || '?'}% avg view`;
   } catch (_) {
     el.textContent = previous || '—';
+  }
+}
+
+// ─── vidIQ Credits Display ─────────────────────────────────────────────────────────
+// Reads the balance from /api/vidiq/stats (cached, so we can call this freely).
+// Shows: "💳 2,847 / 2,000 credits" with a tooltip explaining the bucket split.
+// When balance is critical (< 20 credits), the bar turns amber; at 0 it's red.
+async function loadVidiqCredits() {
+  const wrap = document.getElementById('vidiqCredits');
+  if (!wrap) return;
+  try {
+    const r = await fetch(`${API}/vidiq/stats`);
+    if (!r.ok) throw new Error(`API ${r.status}`);
+    const data = await r.json();
+    const bal = data.balance || {};
+    // Field semantics: total = renewable + addOn; renewableResetsAt tells us when
+    // the bucket refills. We expose both so Dirk doesn't get surprised.
+    const renewable = bal.renewableCredits ?? 0;
+    const addOn = bal.addOnCredits ?? 0;
+    const maxRenewable = bal.maxRenewableCredits ?? 0;
+    const total = renewable + addOn;
+    const resetsAt = bal.renewableResetsAt ? new Date(bal.renewableResetsAt) : null;
+    const fmt = (n) => new Intl.NumberFormat('de-DE').format(n);
+    const resetStr = resetsAt
+      ? resetsAt.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+      : null;
+    wrap.querySelector('.vidiq-credits__value').textContent =
+      maxRenewable > 0 ? `${fmt(total)} / ${fmt(maxRenewable)}` : `${fmt(total)}`;
+    const hint = wrap.querySelector('.vidiq-credits__hint');
+    hint.textContent = resetStr ? `Reset ${resetStr}` : 'Stand jetzt';
+    wrap.title =
+      `vidIQ API Credits\n` +
+      `Renewable: ${fmt(renewable)} / ${fmt(maxRenewable)}${resetStr ? ` (Reset ${resetStr})` : ''}\n` +
+      `Add-on (Bonus): ${fmt(addOn)}\n` +
+      `Gesamt: ${fmt(total)}`;
+    // Color states: <20% amber, 0 red, else neutral.
+    wrap.classList.toggle('vidiq-credits--low', maxRenewable > 0 && total < maxRenewable * 0.2);
+    wrap.classList.toggle('vidiq-credits--zero', total === 0);
+  } catch (e) {
+    wrap.querySelector('.vidiq-credits__value').textContent = '—';
+    wrap.querySelector('.vidiq-credits__hint').textContent = 'nicht erreichbar';
   }
 }
 

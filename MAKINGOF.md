@@ -738,3 +738,88 @@ Dirk felt it without me pointing it out, which is the best kind of
 improvement.
 
 By Nix 🐧 & Dirk, 2026. *"Fewer requests, more render."*
+
+---
+
+## vidIQ Refresh UX — 2026-06-30
+
+The original `refreshVidiq()` UI had two papercuts that Dirk flagged:
+
+1. **"Lade Daten… (0%)" for the first few seconds, then "✓ Fertig!"** —
+   no sense of *what* was actually happening. The server-side
+   `runVidiqRefresh()` had six distinct phases (init → stats → balance →
+   long videos → short videos → watchtime → per-video cache loop), but
+   only a numeric `progress/total` was exposed to the frontend.
+2. **vidIQ credit balance was invisible until something went wrong.**
+   The balance data was already in `/api/vidiq/stats` (the cache endpoint),
+   but nothing in the UI showed it. The first sign of trouble was a
+   failed MCP call after burning through the monthly quota.
+
+### Fix
+
+- New `current_step TEXT` column on `vidiq_refresh_jobs`. Every
+  `updateProgress(step, label)` call now writes both a number and a
+  human-readable string. Schema migration is idempotent (ALTER wrapped
+  in try/catch — SQLite errors on "column already exists" but that's
+  fine on fresh DBs).
+- `refreshVidiq()` poll reads `job.currentStep` and renders it
+  alongside the percentage, e.g. `📊 Kanal-Statistiken werden geladen… · 33%`.
+  Fallback to the old generic message for very early polls where
+  `currentStep` isn't set yet.
+- New `<div id="vidiqCredits">` block under the refresh button. On
+  page load (and after every successful refresh) it calls
+  `loadVidiqCredits()` which fetches `/api/vidiq/stats` and renders
+  `💳 96 / 2,000  ·  Reset 01.07. 10:25` with a hover tooltip breaking
+  out renewable vs. add-on buckets. Color states: amber below 20% of
+  the renewable cap, red at zero.
+- After a successful refresh, the UI now shows
+  `✓ Fertig! · 14 Credits verbraucht` — the delta is computed
+  client-side by snapshotting `renewable + addOn` right before the POST
+  and subtracting the value from `job.result.balance` once `done` lands.
+
+### Side fix
+
+The pre-existing schema had `started_at TEXT` with **no DEFAULT** —
+every job row's `started_at` was NULL, so `ORDER BY started_at DESC`
+returned them in undefined order. Added `DEFAULT (datetime('now'))` in
+the canonical schema, explicit `started_at` write in the POST handler,
+and a one-time `UPDATE … SET started_at = COALESCE(finished_at,
+datetime('now'))` to backfill the historical rows.
+
+### Cost
+
+The new `current_step` updates happen synchronously after every
+`updateProgress()` call (no extra MCP round-trip, just an SQL UPDATE),
+so the per-refresh overhead is sub-millisecond. Credits are unchanged —
+same six steps as before.
+
+By Nix 🐧 & Dirk, 2026. *"Show your work."*
+
+### Credit-gate on refresh — 2026-06-30
+
+Same morning, same session: Dirk pointed out that the credit-balance
+display was only useful *after* something already went wrong. The
+refresh button still happily fired the POST even when the balance was
+zero, and the user only found out via an MCP error ~30s later.
+
+Two-layer approach:
+
+1. **Hard stop** (`total <= 0`): refuse the POST entirely. Show
+   `✗ vidIQ-Credits leer — Reset 01.07. 10:25` in the status line,
+   button label switches to `⟳ Retry`. Saves 30 seconds and a
+   confusing API error.
+2. **Soft warn** (`total < 30`): yellow `⚠ Nur X Credits übrig`
+   notice flashes for ~800ms before the polling kicks in. The user
+   *sees* the warning even though the refresh still proceeds —
+   important because a refresh can legitimately complete on 10-15
+   credits if most videos are already in the per-video cache
+   (cache hits are free, only `vidiq_get_videos_by_ids` on cache
+   miss costs 1).
+
+The thresholds live in two named constants at the top of the file
+(`REFRESH_MIN_CREDITS = 10`, `WARN_LOW_CREDITS = 30`). The first
+is reserved for a future server-side enforcement so the gate
+also works for scripted refreshes (cron, etc.) that bypass the
+frontend.
+
+By Nix 🐧 & Dirk, 2026. *"Don't make the user pay for the absence of feedback."*

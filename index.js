@@ -131,17 +131,28 @@ async function initDB() {
     `);
     saveDB();
   }
-  // Migration: ensure vidiq_refresh_jobs exists for existing DBs
+  // Migration: ensure vidiq_refresh_jobs exists for existing DBs.
+// v0.10 schema lacked a DEFAULT on started_at (jobs ended up with NULL started_at)
+// and was missing current_step entirely (UI could only show "Lade Daten… (N%)").
+// Fresh DBs get the full schema; older DBs get best-effort ALTERs + a backfill.
   db.run(`CREATE TABLE IF NOT EXISTS vidiq_refresh_jobs (
     job_id TEXT PRIMARY KEY,
     status TEXT DEFAULT 'pending',
     progress INTEGER DEFAULT 0,
     total INTEGER DEFAULT 6,
+    current_step TEXT,
     result TEXT,
     error TEXT,
-    started_at TEXT,
+    started_at TEXT DEFAULT (datetime('now')),
     finished_at TEXT
   )`);
+  // Add missing columns to pre-v0.11 DBs. SQLite ALTER ignores DEFAULT on
+  // ADD COLUMN, so we can't backfill the started_at DEFAULT — instead we
+  // (1) always write started_at explicitly in runVidiqRefresh() and
+  // (2) backfill existing NULL rows with finished_at below.
+  try { db.run(`ALTER TABLE vidiq_refresh_jobs ADD COLUMN current_step TEXT`); } catch (e) { /* already exists */ }
+  // Pre-fill existing NULL/empty started_at with finished_at (or now) so ORDER BY works.
+  db.run(`UPDATE vidiq_refresh_jobs SET started_at = COALESCE(NULLIF(finished_at, ''), datetime('now')) WHERE started_at IS NULL OR started_at = ''`);
   // Migration: research_jobs for Vidi/Nix-Research-Trigger (v0.10, 2026-06-11)
   db.run(`CREATE TABLE IF NOT EXISTS research_jobs (
     job_id TEXT PRIMARY KEY,
@@ -655,6 +666,45 @@ app.get('/api/vidiq/stats', (req, res) => {
   }
 });
 
+// GET /api/vidiq/balance-live → live credit balance from vidIQ MCP, no cache read.
+// `vidiq_balance` is a tool read (current docs: 0 credits per call on this account;
+// treat any nonzero cost as a possible billing surprise — wrap in the catch below).
+// Writes the result into the existing `vidiq_cache.balance` blob so any later
+// cache-based pre-flight sees a fresh value. Idempotent; safe to spam.
+//
+// Why this exists: the pre-flight gate in refreshVidiq() reads /api/vidiq/stats
+// and bails if `balance.total ≤ 0`. If the cached balance blob is empty/{} or
+// otherwise stale (the "0-Credit-Loop"), this route is the way out: it forces
+// a fresh read and self-heals the cache for the next refresh.
+app.get('/api/vidiq/balance-live', async (req, res) => {
+  const CHANNEL_ID = 'UC-YmLEIgdESaoVN3ZKNT_QA';
+  try {
+    const output = execSync(vidIqCmd(3, 'vidiq_balance', {}), { encoding: 'utf8', timeout: 15000 });
+    const parsed = parseVidiqResponse(output);
+    if (!parsed || typeof parsed !== 'object') {
+      log.error('[vidIQ] balance-live: parse failed');
+      res.status(502).json({ error: 'vidIQ balance parse failed', raw: output.slice(0, 200) });
+      return;
+    }
+    // Normalize: response may wrap the balance payload in different shapes
+    // (bare balance object, or { balance: {...} }, or { type, totalCredits, ... }).
+    const balance = parsed.balance && typeof parsed.balance === 'object' ? parsed.balance : parsed;
+
+    // Self-heal: merge into existing cache blob so /api/vidiq/stats picks it up.
+    const existingRows = getAll('SELECT data FROM vidiq_cache WHERE channel_id = ?', CHANNEL_ID);
+    const merged = existingRows.length > 0 ? JSON.parse(existingRows[0].data) : {};
+    merged.balance = balance;
+    merged.channelId = CHANNEL_ID;
+    run('INSERT OR REPLACE INTO vidiq_cache (channel_id, data, fetched_at) VALUES (?, ?, datetime("now"))', CHANNEL_ID, JSON.stringify(merged));
+    saveDB();
+
+    res.json({ balance, healed: true });
+  } catch (e) {
+    log.error('[vidIQ] balance-live error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/vidiq/channel-stats → subs, views, watchtimeHours, videoCount + latest video
 app.get('/api/vidiq/channel-stats', (req, res) => {
   try {
@@ -831,43 +881,54 @@ async function runVidiqRefresh(jobId) {
   log.info('[vidIQ] runVidiqRefresh gestartet, jobId:', jobId);
   const CHANNEL_ID = 'UC-YmLEIgdESaoVN3ZKNT_QA';
 
-  function updateProgress(step) {
-    run('UPDATE vidiq_refresh_jobs SET progress = ? WHERE job_id = ?', step, jobId);
+  function updateProgress(step, label) {
+    if (label) {
+      run('UPDATE vidiq_refresh_jobs SET progress = ?, current_step = ? WHERE job_id = ?', step, label, jobId);
+    } else {
+      run('UPDATE vidiq_refresh_jobs SET progress = ? WHERE job_id = ?', step, jobId);
+    }
     saveDB();
   }
 
   try {
-    // Step 1: Initialize
+    // Step 1: Initialize (MCP handshake, 0 credits)
+    updateProgress(1, '🔌 Verbindung zu vidIQ wird aufgebaut…');
     execSync(vidIqCmd(1, 'initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'contentix', version: '1.0' } }), { encoding: 'utf8', timeout: 10000 });
-    updateProgress(1);
+    updateProgress(1, '✓ Verbindung zu vidIQ aufgebaut');
 
     // Step 2: Stats
+    updateProgress(2, '📊 Kanal-Statistiken werden geladen…');
     const statsOutput = execSync(vidIqCmd(2, 'vidiq_channel_stats', { channelId: CHANNEL_ID }), { encoding: 'utf8', timeout: 15000 });
-    updateProgress(2);
+    updateProgress(2, '✓ Kanal-Statistiken geladen');
 
     // Step 3: Balance
+    updateProgress(3, '💳 Credit-Stand wird abgefragt…');
     const balanceOutput = execSync(vidIqCmd(3, 'vidiq_balance', {}), { encoding: 'utf8', timeout: 15000 });
-    updateProgress(3);
+    updateProgress(3, '✓ Credit-Stand geladen');
 
     // Step 4: Long videos
+    updateProgress(4, '🎬 Long-Videos werden geladen…');
     const longOutput = execSync(vidIqCmd(4, 'vidiq_channel_videos', { channelId: CHANNEL_ID, videoFormat: 'long', popular: false }), { encoding: 'utf8', timeout: 15000 });
-    updateProgress(4);
+    updateProgress(4, '✓ Long-Videos geladen');
 
     // Step 5: Short videos
+    updateProgress(5, '📱 Shorts werden geladen…');
     const shortOutput = execSync(vidIqCmd(5, 'vidiq_channel_videos', { channelId: CHANNEL_ID, videoFormat: 'short', popular: false }), { encoding: 'utf8', timeout: 15000 });
-    updateProgress(5);
+    updateProgress(5, '✓ Shorts geladen');
 
     // Step 6: Watchtime (28-day rolling window, 5 vidIQ credits).
     // Errors are non-fatal — we don't want a watchtime hiccup to fail the
     // whole refresh; sidebar will just show "—" until the next attempt.
+    updateProgress(6, '⏱️  Watchtime wird geladen… (5 Credits)');
     try {
       const { minutes, avgViewPercentage } = await fetchWatchtimeFromVidiq(CHANNEL_ID);
       saveWatchtime(CHANNEL_ID, minutes, avgViewPercentage);
       log.info(`[vidIQ] Watchtime geladen: ${minutes} Min (${avgViewPercentage}% avg view)`);
+      updateProgress(6, '✓ Watchtime geladen');
     } catch (wtErr) {
       log.error('[vidIQ] Watchtime refresh fehlgeschlagen (nicht-fatal):', wtErr.message);
+      updateProgress(6, '⚠ Watchtime fehlgeschlagen (Rest lief weiter)');
     }
-    updateProgress(6);
 
     let stats = {};
     let balance = {};
@@ -942,6 +1003,7 @@ async function runVidiqRefresh(jobId) {
         const ageMs = (Date.now() - new Date(cached[0].fetched_at).getTime()) / 1000 / 60;
         if (ageMs < 60) { cachedCount++; continue; }
       }
+      updateProgress(TOTAL_REFRESH_STEPS + cachedCount, `🔄 Video ${cachedCount + 1}/${totalVideos} wird geladen… (1 Credit)`);
       try {
         const out = execSync(vidIqCmd(99, 'vidiq_get_videos_by_ids', { videoIds: [vid] }), { encoding: 'utf8', timeout: 15000 });
         const parsed = parseVidiqResponse(out);
@@ -951,7 +1013,7 @@ async function runVidiqRefresh(jobId) {
         }
       } catch(e) { /* skip individual failures */ }
       cachedCount++;
-      updateProgress(TOTAL_REFRESH_STEPS + cachedCount);
+      updateProgress(TOTAL_REFRESH_STEPS + cachedCount, `✓ Video ${cachedCount}/${totalVideos} geladen`);
     }
     saveDB();
 
@@ -975,8 +1037,9 @@ app.post('/api/vidiq/refresh', (req, res) => {
   const CHANNEL_ID = 'UC-YmLEIgdESaoVN3ZKNT_QA';
 
   try {
-    // Create job record
-    run('INSERT INTO vidiq_refresh_jobs (job_id, status, progress, total) VALUES (?, ?, 0, ?)', jobId, 'running', TOTAL_REFRESH_STEPS);
+    // Create job record. started_at is set explicitly because pre-v0.11 DBs
+    // don't have a column DEFAULT — null started_at breaks ORDER BY.
+    run('INSERT INTO vidiq_refresh_jobs (job_id, status, progress, total, current_step, started_at) VALUES (?, ?, 0, ?, ?, datetime(\"now\"))', jobId, 'running', TOTAL_REFRESH_STEPS, '🚀 Refresh wird vorbereitet…');
     saveDB();
     log.info('[vidIQ] Job erstellt:', jobId);
 
@@ -1002,6 +1065,7 @@ app.get('/api/vidiq/refresh/status/:jobId', (req, res) => {
     status: job.status,
     progress: job.progress,
     total: job.total,
+    currentStep: job.current_step,  // human-readable label for UI
     error: job.error,
     started_at: job.started_at,
     finished_at: job.finished_at,
