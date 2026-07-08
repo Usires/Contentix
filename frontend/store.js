@@ -56,9 +56,18 @@ function createStore(initialState) {
    * @param {(state: object) => T} selector
    * @returns {T}
    */
-  function select(selector) {
-    const snapshot = JSON.parse(JSON.stringify(state));
-    return selector(snapshot);
+  function select(selector, opts = {}) {
+    if (opts.immutable === true) {
+      // Snapshot mode: full deep-clone via JSON round-trip.
+      // Use this ONLY if you intend to mutate the returned state outside
+      // of setState(). The vast majority of consumers should leave it off.
+      const snapshot = JSON.parse(JSON.stringify(state));
+      return selector(snapshot);
+    }
+    // Default (fast) path: pass the live state object. ADR-001 says consumers
+    // must treat the result as read-only, so the clone is unnecessary.
+    // Hot paths (kanban render, drag-and-drop) skip the allocation.
+    return selector(state);
   }
 
   // ---------------------------------------------------------------------

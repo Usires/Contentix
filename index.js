@@ -274,6 +274,35 @@ function parseVidiqResponse(output) {
   } catch(e) { console.error('Parse error:', e.message); return null; }
 }
 
+// Convenience: call a vidIQ MCP tool via the local wrapper, then parse its
+// envelope. Returns null on parse failure or non-zero exit (callers are
+// expected to handle null gracefully — vidIQ responses are best-effort).
+// Used in the refresh pipeline and the per-video cache loop.
+function callVidiqTool(name, args, timeoutMs = 15000) {
+  // Per-tool numeric IDs used by the local MCP shim. Mirrors the IDs
+  // sprinkled through runVidiqRefresh; centralizing them here keeps the
+  // mapping in one place.
+  const TOOL_IDS = {
+    vidiq_balance: 3,
+    vidiq_channel_stats: 2,
+    vidiq_channel_videos: 4,
+    vidiq_get_videos_by_ids: 99,
+    vidiq_channel_analytics: 99,
+  };
+  const cmdId = TOOL_IDS[name];
+  if (!cmdId) {
+    console.error(`callVidiqTool: unknown tool ${name}`);
+    return null;
+  }
+  try {
+    const output = execSync(vidIqCmd(cmdId, name, args), { encoding: 'utf8', timeout: timeoutMs });
+    return parseVidiqResponse(output);
+  } catch (e) {
+    console.error(`callVidiqTool(${name}) failed:`, e.message);
+    return null;
+  }
+}
+
 function autoMatchVidiq(cardId, youtubeUrl, needsTitle, needsThumb) {
   const vidMatch = youtubeUrl.match(/(?:v=|\/youtu\.be\/)([^&\s?]+)/);
   if (!vidMatch) return;
@@ -358,29 +387,50 @@ app.post('/api/scripts', (req, res) => {
   }
 });
 
+// Shared UPDATE helper. Builds a safe UPDATE statement from a list of
+// (column, value) pairs, restricted to an allowlist of columns so callers
+// can't smuggle SQL through req.body keys. Returns the updated row, or
+// null if no column was set (no-op).
+//
+// Special-case columns (those needing pre-processing like JSON.stringify)
+// are handled by the caller passing already-encoded values; this keeps the
+// helper generic across tables that don't share the same column needs.
+function applyUpdate(table, id, fields, allowedColumns, preEncode = {}) {
+  const updates = [];
+  const params = [];
+  for (const col of allowedColumns) {
+    if (!(col in fields) || fields[col] === undefined) continue;
+    updates.push(`${col} = ?`);
+    params.push(preEncode[col] ? preEncode[col](fields[col]) : fields[col]);
+  }
+  if (updates.length === 0) {
+    // No-op: return the current row if it exists, else null
+    return get(`SELECT * FROM ${table} WHERE id = ?`, id);
+  }
+  updates.push('updated_at = ?');
+  params.push(new Date().toISOString());
+  params.push(id);
+  run(`UPDATE ${table} SET ${updates.join(', ')} WHERE id = ?`, ...params);
+  saveDB();
+  return get(`SELECT * FROM ${table} WHERE id = ?`, id);
+}
+
+// Allowlist of columns each table accepts via UPDATE. Single source of
+// truth for the API surface — adding a new column means one line here
+// plus the schema migration.
+const SCRIPT_COLUMNS = ['title', 'slug', 'folder', 'status', 'content', 'video_id', 'video_format', 'tags', 'position'];
+const VIDEO_COLUMNS = ['title', 'status', 'video_format', 'thumbnail_url', 'planned_date', 'published_date', 'video_id', 'youtube_url', 'tags', 'notes', 'nix_comment', 'nix_comment_source', 'owner', 'script_id', 'position'];
+// Map of columns whose value needs JSON encoding before SQL.
+const JSON_ENCODE_COLUMNS = { tags: JSON.stringify };
+
 app.put('/api/scripts/:id', (req, res) => {
   try {
     const { id } = req.params;
-    const { title, slug, folder, status, content, video_id, video_format, tags, position } = req.body;
-    const updates = [];
-    const params = [];
-    if (title !== undefined) { updates.push('title = ?'); params.push(title); }
-    if (slug !== undefined) { updates.push('slug = ?'); params.push(slug); }
-    if (folder !== undefined) { updates.push('folder = ?'); params.push(folder); }
-    if (status !== undefined) { updates.push('status = ?'); params.push(status); }
-    if (content !== undefined) { updates.push('content = ?'); params.push(content); }
-    if (video_id !== undefined) { updates.push('video_id = ?'); params.push(video_id); }
-    if (video_format !== undefined) { updates.push('video_format = ?'); params.push(video_format); }
-    if (tags !== undefined) { updates.push('tags = ?'); params.push(JSON.stringify(tags)); }
-    if (position !== undefined) { updates.push('position = ?'); params.push(position); }
-    updates.push('updated_at = ?'); params.push(new Date().toISOString());
-    params.push(id);
-    run(`UPDATE scripts SET ${updates.join(', ')} WHERE id = ?`, ...params);
+    const updated = applyUpdate('scripts', id, req.body, SCRIPT_COLUMNS, JSON_ENCODE_COLUMNS);
     // Return the full updated record so optimistic-update flows in the
     // frontend store can reconcile without a follow-up GET. Previously
     // this returned `{status: 'ok'}`, which caused the store to overwrite
     // the full record with that stub. (ADR-001 + Phase 2 migration, 2026-06-25)
-    const updated = get('SELECT * FROM scripts WHERE id = ?', id);
     res.json({ ...updated, tags: updated.tags ? JSON.parse(updated.tags) : [] });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -545,36 +595,12 @@ app.post('/api/videos', (req, res) => {
 app.put('/api/videos/:id', (req, res) => {
   try {
     const { id } = req.params;
+    const { status, youtube_url } = req.body;
     const existing = getAll('SELECT * FROM videos WHERE id = ?', id)[0];
     if (!existing) { res.status(404).json({ error: 'Video nicht gefunden' }); return; }
-    const { title, status, video_format, thumbnail_url, planned_date, published_date, video_id, youtube_url, tags, notes, nix_comment, nix_comment_source, owner, position, script_id } = req.body;
-    
-    const updates = [];
-    const params = [];
-    
-    if (title !== undefined) { updates.push('title = ?'); params.push(title); }
-    if (status !== undefined) { updates.push('status = ?'); params.push(status); }
-    if (video_format !== undefined) { updates.push('video_format = ?'); params.push(video_format); }
-    if (thumbnail_url !== undefined) { updates.push('thumbnail_url = ?'); params.push(thumbnail_url); }
-    if (planned_date !== undefined) { updates.push('planned_date = ?'); params.push(planned_date); }
-    if (published_date !== undefined) { updates.push('published_date = ?'); params.push(published_date); }
-    if (video_id !== undefined) { updates.push('video_id = ?'); params.push(video_id); }
-    if (youtube_url !== undefined) { updates.push('youtube_url = ?'); params.push(youtube_url); }
-    if (tags !== undefined) { updates.push('tags = ?'); params.push(JSON.stringify(tags)); }
-    if (notes !== undefined) { updates.push('notes = ?'); params.push(notes); }
-    if (nix_comment !== undefined) { updates.push('nix_comment = ?'); params.push(nix_comment); }
-    if (nix_comment_source !== undefined) { updates.push("nix_comment_source = ?"); params.push(nix_comment_source); }
-    if (owner !== undefined) { updates.push("owner = ?"); params.push(owner); }
-    if (script_id !== undefined) { updates.push('script_id = ?'); params.push(script_id); }
-    if (position !== undefined) { updates.push('position = ?'); params.push(position); }
-    
-    updates.push('updated_at = ?');
-    params.push(new Date().toISOString());
-    params.push(id);
-    
-    run(`UPDATE videos SET ${updates.join(', ')} WHERE id = ?`, ...params);
-    saveDB();
-    
+    const updated = applyUpdate('videos', id, req.body, VIDEO_COLUMNS, JSON_ENCODE_COLUMNS);
+    if (!updated) { res.status(404).json({ error: 'Video nicht gefunden' }); return; }
+
     // Feature 2: Auto-match when published + youtube_url present
     if (status === 'published' && youtube_url) {
       const card = getAll('SELECT * FROM videos WHERE id = ?', id)[0];
@@ -582,9 +608,8 @@ app.put('/api/videos/:id', (req, res) => {
       const needsThumb = !card.thumbnail_url || card.thumbnail_url.trim() === '';
       if (needsTitle || needsThumb) autoMatchVidiq(id, youtube_url, needsTitle, needsThumb);
     }
-    
-    const video = getAll('SELECT * FROM videos WHERE id = ?', id)[0];
-    const parsed = { ...video, tags: video.tags ? JSON.parse(video.tags) : [] };
+
+    const parsed = { ...updated, tags: updated.tags ? JSON.parse(updated.tags) : [] };
     res.json(parsed);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -596,37 +621,9 @@ app.patch('/api/videos/:id', (req, res) => {
     const { id } = req.params;
     const existing = getAll('SELECT * FROM videos WHERE id = ?', id)[0];
     if (!existing) { res.status(404).json({ error: 'Video nicht gefunden' }); return; }
-    const { title, status, video_format, thumbnail_url, planned_date, published_date, video_id, youtube_url, tags, notes, nix_comment, nix_comment_source, owner, position, script_id } = req.body;
-    
-    const updates = [];
-    const params = [];
-    
-    if (title !== undefined) { updates.push('title = ?'); params.push(title); }
-    if (status !== undefined) { updates.push('status = ?'); params.push(status); }
-    if (video_format !== undefined) { updates.push('video_format = ?'); params.push(video_format); }
-    if (thumbnail_url !== undefined) { updates.push('thumbnail_url = ?'); params.push(thumbnail_url); }
-    if (planned_date !== undefined) { updates.push('planned_date = ?'); params.push(planned_date); }
-    if (published_date !== undefined) { updates.push('published_date = ?'); params.push(published_date); }
-    if (video_id !== undefined) { updates.push('video_id = ?'); params.push(video_id); }
-    if (youtube_url !== undefined) { updates.push('youtube_url = ?'); params.push(youtube_url); }
-    if (tags !== undefined) { updates.push('tags = ?'); params.push(JSON.stringify(tags)); }
-    if (notes !== undefined) { updates.push('notes = ?'); params.push(notes); }
-    if (nix_comment !== undefined) { updates.push('nix_comment = ?'); params.push(nix_comment); }
-    if (nix_comment_source !== undefined) { updates.push("nix_comment_source = ?"); params.push(nix_comment_source); }
-    if (owner !== undefined) { updates.push("owner = ?"); params.push(owner); }
-    if (script_id !== undefined) { updates.push('script_id = ?'); params.push(script_id); }
-    if (position !== undefined) { updates.push('position = ?'); params.push(position); }
-    
-    updates.push('updated_at = ?');
-    params.push(new Date().toISOString());
-    params.push(id);
-    
-    run(`UPDATE videos SET ${updates.join(', ')} WHERE id = ?`, ...params);
-    saveDB();
-    
-    const video = getAll('SELECT * FROM videos WHERE id = ?', id)[0];
-    if (!video) { res.status(404).json({ error: 'Video nicht gefunden' }); return; }
-    const parsed = { ...video, tags: video.tags ? JSON.parse(video.tags) : [] };
+    const updated = applyUpdate('videos', id, req.body, VIDEO_COLUMNS, JSON_ENCODE_COLUMNS);
+    if (!updated) { res.status(404).json({ error: 'Video nicht gefunden' }); return; }
+    const parsed = { ...updated, tags: updated.tags ? JSON.parse(updated.tags) : [] };
     res.json(parsed);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -915,22 +912,22 @@ async function runVidiqRefresh(jobId) {
 
     // Step 2: Stats
     updateProgress(2, '📊 Kanal-Statistiken werden geladen…');
-    const statsOutput = execSync(vidIqCmd(2, 'vidiq_channel_stats', { channelId: CHANNEL_ID }), { encoding: 'utf8', timeout: 15000 });
+    const stats = callVidiqTool('vidiq_channel_stats', { channelId: CHANNEL_ID }) || {};
     updateProgress(2, '✓ Kanal-Statistiken geladen');
 
     // Step 3: Balance
     updateProgress(3, '💳 Credit-Stand wird abgefragt…');
-    const balanceOutput = execSync(vidIqCmd(3, 'vidiq_balance', {}), { encoding: 'utf8', timeout: 15000 });
+    const balance = callVidiqTool('vidiq_balance', {}) || {};
     updateProgress(3, '✓ Credit-Stand geladen');
 
     // Step 4: Long videos
     updateProgress(4, '🎬 Long-Videos werden geladen…');
-    const longOutput = execSync(vidIqCmd(4, 'vidiq_channel_videos', { channelId: CHANNEL_ID, videoFormat: 'long', popular: false }), { encoding: 'utf8', timeout: 15000 });
+    const longParsed = callVidiqTool('vidiq_channel_videos', { channelId: CHANNEL_ID, videoFormat: 'long', popular: false });
     updateProgress(4, '✓ Long-Videos geladen');
 
     // Step 5: Short videos
     updateProgress(5, '📱 Shorts werden geladen…');
-    const shortOutput = execSync(vidIqCmd(5, 'vidiq_channel_videos', { channelId: CHANNEL_ID, videoFormat: 'short', popular: false }), { encoding: 'utf8', timeout: 15000 });
+    const shortParsed = callVidiqTool('vidiq_channel_videos', { channelId: CHANNEL_ID, videoFormat: 'short', popular: false });
     updateProgress(5, '✓ Shorts geladen');
 
     // Step 6: Watchtime (28-day rolling window, 5 vidIQ credits).
@@ -947,18 +944,12 @@ async function runVidiqRefresh(jobId) {
       updateProgress(6, '⚠ Watchtime fehlgeschlagen (Rest lief weiter)');
     }
 
-    let stats = {};
-    let balance = {};
+    // `stats` and `balance` are already parsed objects from callVidiqTool above.
+// (callVidiqTool returns null on parse failure, defaulted to {} via ||.)
 
-    const statsParsed = parseVidiqResponse(statsOutput);
-    if (statsParsed) stats = statsParsed;
-    const balanceParsed = parseVidiqResponse(balanceOutput);
-    if (balanceParsed) balance = balanceParsed;
-
-    let videosImported = 0;
-    for (const fmt of ['long', 'short']) {
-      const output = fmt === 'long' ? longOutput : shortOutput;
-      const parsed = parseVidiqResponse(output);
+let videosImported = 0;
+for (const fmt of ['long', 'short']) {
+      const parsed = fmt === 'long' ? longParsed : shortParsed;
       if (parsed && parsed.videos) {
         for (const v of parsed.videos) {
           try {
@@ -979,7 +970,7 @@ async function runVidiqRefresh(jobId) {
 
     // Find latest video from long videos
     let latestVideo = null;
-    const longParsed = parseVidiqResponse(longOutput);
+    // longParsed was already populated by callVidiqTool in Step 4.
     if (longParsed && longParsed.videos && longParsed.videos.length > 0) {
       const sorted = [...longParsed.videos].sort((a, b) => {
         const da = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
@@ -1042,8 +1033,7 @@ async function runVidiqRefresh(jobId) {
       }
       updateProgress(TOTAL_REFRESH_STEPS + cachedCount, `🔄 Video ${cachedCount + 1}/${totalVideos} wird geladen… (1 Credit)`);
       try {
-        const out = execSync(vidIqCmd(99, 'vidiq_get_videos_by_ids', { videoIds: [vid] }), { encoding: 'utf8', timeout: 15000 });
-        const parsed = parseVidiqResponse(out);
+        const parsed = callVidiqTool('vidiq_get_videos_by_ids', { videoIds: [vid] });
         if (parsed && parsed.videos && parsed.videos[0]) {
           const vd = parsed.videos[0];
           run('INSERT OR REPLACE INTO vidiq_video_cache (video_id, data, fetched_at) VALUES (?, ?, datetime("now"))', vid, JSON.stringify(vd));

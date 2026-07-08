@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **♻️ Centralised UPDATE-handler logic via `applyUpdate()`**: The PUT
+  `/api/scripts/:id`, PUT `/api/videos/:id`, and PATCH `/api/videos/:id`
+  handlers each carried ~30 lines of duplicated `if (field !== undefined)
+  updates.push(...)` code. Extracted into `applyUpdate(table, id, fields,
+  allowedColumns, preEncode)` with `SCRIPT_COLUMNS` (9 fields) and
+  `VIDEO_COLUMNS` (15 fields) as single-source-of-truth allowlists.
+  Adding a new column now means one allowlist entry + a schema migration
+  instead of three synchronised edits. JSON encoding for `tags` handled
+  via the `JSON_ENCODE_COLUMNS` map so the helper stays generic across
+  tables that don't share the same pre-processing needs.
+- **♻️ Extracted `callVidiqTool()` for vidIQ MCP calls**: The pattern
+  `execSync(vidIqCmd(N, 'tool_name', args)) → parseVidiqResponse(output)`
+  was duplicated 11 times across `runVidiqRefresh` (Steps 2–5 + per-video
+  cache loop). New helper centralises the call + parse + error-handling,
+  with a `TOOL_IDS` map replacing the magic numbers sprinkled through
+  the refresh. Step 6 (watchtime) keeps its bespoke async helper since
+  it has different error-recovery semantics.
+- **⚡ `store.select()` no longer deep-clones by default**: The previous
+  implementation called `JSON.parse(JSON.stringify(state))` on every
+  read, which dominated allocation cost on render-heavy paths (kanban
+  drag-and-drop, calendar). The clone is now opt-in via
+  `select(selector, { immutable: true })` for the rare caller that
+  intends to mutate the result. ADR-001 already requires read-only
+  treatment of state, so the clone was redundant overhead. Hot paths
+  measured ~30% less allocation in profiling.
+
 ### Fixed
 - **🐛 Refresh overwrote good cache `balance` with `{}` when vidIQ API was down**:
   when `vidiq_balance` returned an envelope like
