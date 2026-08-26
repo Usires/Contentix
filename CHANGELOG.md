@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **📋 4-Bot audit reports** (`docs/archbot-review-2026-08-26.md`,
+  `docs/qabot-test-coverage-2026-08-26.md`,
+  `docs/refactorbot-lib-plan-2026-08-26.md`,
+  `docs/designbot-ux-review-2026-08-26.md`): Nix/main authored these
+  on 2026-08-26 after orchestrating four subagent reviews
+  (`archbot`, `qabot`, `refactorbot`, `designbot`) on the live
+  Contentix v1 tree. Each report carries P0/P1/P2 findings plus
+  concrete next steps. The subagent runs were the first
+  multi-bot audit on this repo and exposed several patterns the
+  bot spawning pipeline should adopt (see the NixBoard CONT card).
+  Findings worth tackling first:
+  - **U1** card title truncation in the Bibliothek grid
+    (Mockup vs. Live comparison in `designbot-ux-review`).
+  - **U2** duplicated cards across the "Letzte 6" and
+    "Evergreens" sections (same card showing in both).
+  - **F1** `docs/architecture.md` still claims
+    "better-sqlite3 (NO Docker)" but the tree ships
+    `sql.js` plus a working `Dockerfile` and `docker-compose.yml`.
+  - **F2** `frontend/calendar.{js,css}` modified, not committed
+    — the calendar Working Tree is live but unreviewed.
+  - **qabot P0** `/api/scripts/import` accepts absolute paths
+    via `filePath.startsWith('/')` and skips the
+    `/home/dirk/yt-research/` guard — real path-traversal
+    exposure if anyone other than `dirk` can reach the route.
+  - **refactorbot plan** suggests an incremental
+    `lib/db.js → lib/vidiq.js → lib/research.js` extraction
+    (17–25h for the safe path; step 4 route splitting is optional).
+
 ### Changed
 - **♻️ Centralised UPDATE-handler logic via `applyUpdate()`**: The PUT
   `/api/scripts/:id`, PUT `/api/videos/:id`, and PATCH `/api/videos/:id`
