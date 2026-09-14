@@ -1,6 +1,7 @@
 const express = require('express');
 const initSqlJs = require('sql.js');
 const { execSync } = require('child_process');
+const youtubeApi = require('./youtube-api');  // Phase 2: YouTube Data API client
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
@@ -20,12 +21,12 @@ const log = {
   debug: (...a) => { if (LOG_LEVEL === 'debug') console.log ('[debug]', ...a); },
 };
 
-// vidIQ API key check
-if (!process.env.VIDIQ_API_KEY) {
-  console.error('FATAL: VIDIQ_API_KEY environment variable not set');
-  process.exit(1);
+// vidIQ API key is optional in Phase 2 — we use YouTube Data API as primary source.
+// If VIDIQ_API_KEY is set, legacy /api/vidiq/* routes work as fallback; otherwise they return 503.
+const VIDIQ_API_KEY = process.env.VIDIQ_API_KEY || null;
+if (!VIDIQ_API_KEY) {
+  console.warn('[contentix] VIDIQ_API_KEY not set — /api/vidiq/* routes will be unavailable, use /api/youtube/* instead');
 }
-const VIDIQ_API_KEY = process.env.VIDIQ_API_KEY;
 const PORT = process.env.PORT || 3038;
 const API = `http://localhost:${PORT}/api`;
 
@@ -131,6 +132,42 @@ async function initDB() {
     `);
     saveDB();
   }
+  // YouTube Data API v3 cache tables (Phase 2 — replaces vidIQ as primary data source)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS youtube_cache (
+      channel_id TEXT PRIMARY KEY,
+      data TEXT,
+      fetched_at TEXT
+    );
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS youtube_video_cache (
+      video_id TEXT PRIMARY KEY,
+      data TEXT,
+      fetched_at TEXT
+    );
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS youtube_refresh_jobs (
+      job_id TEXT PRIMARY KEY,
+      status TEXT DEFAULT 'pending',
+      progress INTEGER DEFAULT 0,
+      total INTEGER DEFAULT 0,
+      current_step TEXT,
+      result TEXT,
+      error TEXT,
+      started_at TEXT DEFAULT (datetime('now')),
+      finished_at TEXT
+    );
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
   // Migration: ensure vidiq_refresh_jobs exists for existing DBs.
 // v0.10 schema lacked a DEFAULT on started_at (jobs ended up with NULL started_at)
 // and was missing current_step entirely (UI could only show "Lade Daten… (N%)").
@@ -304,30 +341,47 @@ function callVidiqTool(name, args, timeoutMs = 15000) {
 }
 
 function autoMatchVidiq(cardId, youtubeUrl, needsTitle, needsThumb) {
+  // Phase 2 refactor: VidiQ is legacy. Skip silently when no VIDIQ_API_KEY.
+  // We try YouTube cache first (Phase 2 primary), then fall back to VidiQ cache
+  // (legacy, may be populated from before Phase 2). No more sync execSync — the
+  // YouTube bulk-warmup endpoint populates the YT cache for cold videos.
+  if (!VIDIQ_API_KEY) return;
   const vidMatch = youtubeUrl.match(/(?:v=|\/youtu\.be\/)([^&\s?]+)/);
   if (!vidMatch) return;
   const vid = vidMatch[1];
   try {
+    // YouTube cache first (Phase 2 primary source)
+    const ytCached = getCachedYouTubeVideo(vid);
+    if (ytCached) {
+      _applyThumbAndTitleToVideo(cardId, {
+        title: ytCached.title,
+        thumbnail: ytCached.thumbnail || ytCached.thumbnailUrl,
+      }, needsTitle, needsThumb);
+      return;
+    }
+    // Legacy VidiQ cache fallback (only for data populated before Phase 2)
     const cachedRow = getAll('SELECT * FROM vidiq_video_cache WHERE video_id = ?', vid);
-    let vidiqData = null;
     if (cachedRow.length > 0) {
       const ageMs = (Date.now() - new Date(cachedRow[0].fetched_at).getTime()) / 1000 / 60;
-      if (ageMs < 1440) vidiqData = JSON.parse(cachedRow[0].data);
+      if (ageMs < 1440) {
+        const vidiqData = JSON.parse(cachedRow[0].data);
+        _applyThumbAndTitleToVideo(cardId, {
+          title: vidiqData.title,
+          thumbnail: vidiqData.thumbnail || vidiqData.thumbnailUrl,
+        }, needsTitle, needsThumb);
+      }
     }
-    if (!vidiqData) {
-      const output = execSync(vidIqCmd(99, 'vidiq_get_videos_by_ids', { videoIds: [vid] }), { encoding: 'utf8', timeout: 15000 });
-      vidiqData = parseVidiqResponse(output);
-      if (Array.isArray(vidiqData)) vidiqData = vidiqData[0];
-      if (vidiqData && vidiqData.videos) vidiqData = vidiqData.videos[0];
-      if (vidiqData) run('INSERT OR REPLACE INTO vidiq_video_cache (video_id, data, fetched_at) VALUES (?, ?, datetime("now"))', vid, JSON.stringify(vidiqData));
-    }
-    if (vidiqData) {
-      const upds = []; const p = [];
-      if (needsTitle && vidiqData.title) { upds.push('title = ?'); p.push(vidiqData.title); }
-      if (needsThumb && (vidiqData.thumbnail || vidiqData.thumbnailUrl)) { upds.push('thumbnail_url = ?'); p.push(vidiqData.thumbnail || vidiqData.thumbnailUrl); }
-      if (upds.length > 0) { p.push(cardId); run(`UPDATE videos SET ${upds.join(', ')} WHERE id = ?`, ...p); saveDB(); }
-    }
+    // No sync fallback. The bulk-warmup endpoint fills the YouTube cache for new videos.
   } catch(vqErr) { console.error('Auto-match vidIQ error:', vqErr.message); }
+}
+
+// Helper extracted from autoMatchVidiq — keeps title/thumbnail update logic in one place
+function _applyThumbAndTitleToVideo(cardId, data, needsTitle, needsThumb) {
+  if (!data) return;
+  const upds = []; const p = [];
+  if (needsTitle && data.title) { upds.push('title = ?'); p.push(data.title); }
+  if (needsThumb && data.thumbnail) { upds.push('thumbnail_url = ?'); p.push(data.thumbnail); }
+  if (upds.length > 0) { p.push(cardId); run(`UPDATE videos SET ${upds.join(', ')} WHERE id = ?`, ...p); saveDB(); }
 }
 
 // ─── Routes: Scripts CRUD ─────────────────────────────────────────────────────
@@ -525,15 +579,30 @@ app.get('/api/videos-with-stats', async (req, res) => {
             const ageMs = (Date.now() - new Date(cached[0].fetched_at).getTime()) / 1000 / 60;
             if (ageMs < 1440) vidiqData = JSON.parse(cached[0].data);
           }
-          if (vidiqData) {
+          // Phase 2: prefer YouTube Data API cache over legacy vidIQ cache
+          // (vidIQ still works as fallback during transition, but YouTube has
+          // higher data quality: publishedAt, duration, thumbnails).
+          let ytCached = null;
+          try { ytCached = getCachedYouTubeVideo(v.video_id); } catch(e) {}
+
+          if (ytCached) {
+            parsed.views = ytCached.views || 0;
+            parsed.likes = ytCached.likes || 0;
+            parsed.publishedAt = ytCached.publishedAt || null;
+            parsed.duration = ytCached.duration || null;
+            parsed.commentCount = ytCached.comments || ytCached.commentCount || 0;
+            parsed.thumbnail = ytCached.thumbnail || null;
+          } else if (vidiqData) {
             parsed.views = vidiqData.viewCount || 0;
             parsed.likes = vidiqData.likeCount || 0;
             parsed.publishedAt = vidiqData.publishedAt || null;
             parsed.duration = vidiqData.duration || null;
             parsed.commentCount = vidiqData.commentCount || 0;
+            parsed.thumbnail = null;
           } else {
             parsed.views = 0;
             parsed.likes = 0;
+            parsed.thumbnail = null;
           }
         } catch(e) {
           parsed.views = 0;
@@ -546,6 +615,19 @@ app.get('/api/videos-with-stats', async (req, res) => {
       
       enriched.push(parsed);
     }
+        // Fire-and-forget warmup for missing YouTube stats
+        const needsWarmup = enriched.filter(v => v.video_id && !v.thumbnail).slice(0, 20);
+        if (needsWarmup.length > 0) {
+          setImmediate(() => {
+            for (const v of needsWarmup) {
+              youtubeApi.getVideoStats(v.video_id)
+                .then(data => saveCachedYouTubeVideo(v.video_id, data))
+                .catch(e => log.debug('[youtube] warmup failed for ' + v.video_id + ':', e.message));
+            }
+          });
+        }
+
+
     
     res.json(enriched);
   } catch (e) {
@@ -747,71 +829,383 @@ app.get('/api/vidiq/channel-stats', (req, res) => {
 // GET /api/vidiq/watchtime → estimated watch time (minutes → hours), cached 6h.
 // Costs 5 vidIQ credits on a cache miss; cache hit is free.
 // 28-day rolling window. Pairs with vidiq_channel_analytics.
-const CHANNEL_ID_FOR_WATCHTIME = 'UC-YmLEIgdESaoVN3ZKNT_QA';
-const WATCHTIME_CACHE_HOURS = 6;
 
-function getCachedWatchtime(channelId) {
-  // Stored as a sidecar key inside vidiq_cache.data under `_watchtime`.
-  // Returns { minutes, fetchedAt, source } or null.
-  const rows = getAll('SELECT data, fetched_at FROM vidiq_cache WHERE channel_id = ?', channelId);
+// --- YouTube cache settings (mutable in-memory, persisted to app_settings on save)
+const YT_DEFAULTS = {
+  channelTtlHours: 1,
+  videoTtlHours: 24,
+  analyticsTtlHours: 24,
+  refreshMaxVideos: 10,
+  refreshMinIntervalMinutes: 5,
+};
+
+let YT_CACHE_SETTINGS = { ...YT_DEFAULTS };
+
+// Load persisted settings on startup (best-effort, falls back to defaults)
+try {
+  const settingsRows = getAll("SELECT key, value FROM app_settings WHERE key LIKE 'yt.%'");
+  for (const r of settingsRows) {
+    const key = r.key.replace('yt.', '');
+    if (key in YT_CACHE_SETTINGS) {
+      const num = Number(r.value);
+      if (Number.isFinite(num)) YT_CACHE_SETTINGS[key] = num;
+    }
+  }
+  log.info('Loaded YouTube cache settings:', YT_CACHE_SETTINGS);
+} catch (e) {
+  log.warn('Could not load YouTube cache settings:', e.message);
+}
+
+function saveYTSettings() {
+  for (const [key, value] of Object.entries(YT_CACHE_SETTINGS)) {
+    run("INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+        'yt.' + key, String(value));
+  }
+  saveDB();
+}
+
+// --- YouTube cache helpers
+function getCachedYouTubeChannel(channelId) {
+  const ttlMs = YT_CACHE_SETTINGS.channelTtlHours * 60 * 60 * 1000;
+  const rows = getAll('SELECT data, fetched_at FROM youtube_cache WHERE channel_id = ?', channelId);
+  if (rows.length === 0) return null;
+  const ageMs = Date.now() - new Date(rows[0].fetched_at + 'Z').getTime();
+  if (ageMs > ttlMs) return null;
+  return JSON.parse(rows[0].data);
+}
+
+function saveCachedYouTubeChannel(channelId, data) {
+  run('INSERT OR REPLACE INTO youtube_cache (channel_id, data, fetched_at) VALUES (?, ?, datetime("now"))',
+      channelId, JSON.stringify(data));
+  saveDB();
+}
+
+function getCachedYouTubeVideo(videoId) {
+  const ttlMs = YT_CACHE_SETTINGS.videoTtlHours * 60 * 60 * 1000;
+  const rows = getAll('SELECT data, fetched_at FROM youtube_video_cache WHERE video_id = ?', videoId);
+  if (rows.length === 0) return null;
+  const ageMs = Date.now() - new Date(rows[0].fetched_at + 'Z').getTime();
+  if (ageMs > ttlMs) return null;
+  return JSON.parse(rows[0].data);
+}
+
+function saveCachedYouTubeVideo(videoId, data) {
+  run('INSERT OR REPLACE INTO youtube_video_cache (video_id, data, fetched_at) VALUES (?, ?, datetime("now"))',
+      videoId, JSON.stringify(data));
+  saveDB();
+}
+
+function getCachedYouTubeAnalytics(channelId) {
+  const ttlMs = YT_CACHE_SETTINGS.analyticsTtlHours * 60 * 60 * 1000;
+  const rows = getAll('SELECT data, fetched_at FROM youtube_cache WHERE channel_id = ?', channelId);
   if (rows.length === 0) return null;
   try {
     const data = JSON.parse(rows[0].data);
-    if (!data._watchtime) return null;
-    // Use savedAt (UTC ISO string) for the age calculation. `fetched_at` from
-    // SQLite is `datetime('now')` which is also UTC, but we double-check with
-    // savedAt to avoid TZ surprises in the future.
-    const savedAt = data._watchtime.savedAt || rows[0].fetched_at;
-    const ageH = (Date.now() - new Date(savedAt).getTime()) / 1000 / 60 / 60;
-    return {
-      minutes: data._watchtime.minutes,
-      avgViewPercentage: data._watchtime.avgViewPercentage,
-      fetchedAt: savedAt,
-      ageHours: ageH,
-      fresh: ageH < WATCHTIME_CACHE_HOURS,
-    };
+    if (!data._analytics) return null;
+    const savedAt = data._analytics.savedAt || rows[0].fetched_at;
+    const ageMs = Date.now() - new Date(savedAt + 'Z').getTime();
+    if (ageMs > ttlMs) return null;
+    return data._analytics;
   } catch (e) { return null; }
 }
 
-function saveWatchtime(channelId, minutes, avgViewPercentage) {
-  // Merge into existing vidiq_cache.data so we don't lose the channel-stats blob.
-  const rows = getAll('SELECT data FROM vidiq_cache WHERE channel_id = ?', channelId);
+function saveCachedYouTubeAnalytics(channelId, analytics) {
+  const rows = getAll('SELECT data FROM youtube_cache WHERE channel_id = ?', channelId);
   const existing = rows.length > 0 ? JSON.parse(rows[0].data) : {};
-  existing._watchtime = { minutes, avgViewPercentage, savedAt: new Date().toISOString() };
+  existing._analytics = Object.assign({}, analytics, { savedAt: new Date().toISOString() });
   if (rows.length > 0) {
-    run('UPDATE vidiq_cache SET data = ?, fetched_at = ? WHERE channel_id = ?',
+    run('UPDATE youtube_cache SET data = ?, fetched_at = ? WHERE channel_id = ?',
         JSON.stringify(existing), new Date().toISOString(), channelId);
   } else {
-    run('INSERT INTO vidiq_cache (channel_id, data, fetched_at) VALUES (?, ?, ?)',
+    run('INSERT INTO youtube_cache (channel_id, data, fetched_at) VALUES (?, ?, ?)',
         channelId, JSON.stringify(existing), new Date().toISOString());
   }
   saveDB();
 }
 
-async function fetchWatchtimeFromVidiq(channelId) {
-  // 28-day rolling window — matches the dashboard's default period.
-  const end = new Date();
-  const start = new Date(end.getTime() - 28 * 24 * 60 * 60 * 1000);
-  const fmt = d => d.toISOString().slice(0, 10);
-  const output = execSync(
-    vidIqCmd(99, 'vidiq_channel_analytics', {
-      channelId,
-      startDate: fmt(start),
-      endDate: fmt(end),
-      metrics: ['estimatedMinutesWatched', 'averageViewPercentage'],
-    }),
-    { encoding: 'utf8', timeout: 15000 }
-  );
-  const parsed = parseVidiqResponse(output);
-  // Response shape: { rows: [[minutes, avgViewPct], ...], columnHeaders: [...] }
-  const minutes = Number(parsed?.rows?.[0]?.[0] ?? 0);
-  const avgViewPercentage = Number(parsed?.rows?.[0]?.[1] ?? 0);
-  if (!Number.isFinite(minutes) || minutes < 0) {
-    throw new Error(`Unexpected vidiq_channel_analytics response: ${JSON.stringify(parsed).slice(0, 200)}`);
+const YT_CHANNEL_ID_FOR_STATS = 'UC-YmLEIgdESaoVN3ZKNT_QA';
+
+// --- YouTube routes
+
+// GET /api/youtube/channel-stats
+app.get('/api/youtube/channel-stats', (req, res) => {
+  const channelId = req.query.channelId || YT_CHANNEL_ID_FOR_STATS;
+  const cached = getCachedYouTubeChannel(channelId);
+  if (cached) {
+    const rows = getAll('SELECT fetched_at FROM youtube_cache WHERE channel_id = ?', channelId);
+    const fetchedAt = rows[0] ? rows[0].fetched_at : null;
+    return res.json({
+      subs: cached.subscribers || 0,
+      views: cached.views || 0,
+      videoCount: cached.videos || 0,
+      title: cached.title || '',
+      customUrl: cached.customUrl || '',
+      thumbnail: cached.thumbnail || '',
+      cached: true,
+      _fetched_at: fetchedAt,
+    });
   }
-  return { minutes, avgViewPercentage };
+  res.json({ subs: 0, views: 0, videoCount: 0, cached: false });
+});
+
+// POST /api/youtube/refresh -- async job
+let ytRefreshCancelToken = null;
+app.post('/api/youtube/refresh', (req, res) => {
+  const channelId = req.query.channelId || YT_CHANNEL_ID_FOR_STATS;
+  const jobId = require('crypto').randomUUID();
+  run('INSERT INTO youtube_refresh_jobs (job_id, status, progress, total, started_at) VALUES (?, ?, ?, ?, datetime("now"))',
+      jobId, 'pending', 0, 4);
+  saveDB();
+  res.json({ jobId, status: 'pending' });
+
+  ytRefreshCancelToken = new AbortController();
+  runYouTubeRefresh(jobId, channelId, ytRefreshCancelToken.signal).catch(err => {
+    log.error('[youtube] refresh error:', err.message);
+  });
+});
+
+app.get('/api/youtube/refresh/status/:jobId', (req, res) => {
+  const rows = getAll('SELECT * FROM youtube_refresh_jobs WHERE job_id = ?', req.params.jobId);
+  if (rows.length === 0) return res.status(404).json({ error: 'job not found' });
+  const j = rows[0];
+  res.json({
+    jobId: j.job_id,
+    status: j.status,
+    progress: j.progress,
+    total: j.total,
+    currentStep: j.current_step,
+    result: j.result ? JSON.parse(j.result) : null,
+    error: j.error,
+    startedAt: j.started_at,
+    finishedAt: j.finished_at,
+  });
+});
+
+app.delete('/api/youtube/refresh/:jobId', (req, res) => {
+  if (ytRefreshCancelToken) ytRefreshCancelToken.abort();
+  run('UPDATE youtube_refresh_jobs SET status = ?, finished_at = datetime("now") WHERE job_id = ?',
+      'cancelled', req.params.jobId);
+  saveDB();
+  res.json({ ok: true });
+});
+
+// POST /api/youtube/video-stats/:videoId
+app.post('/api/youtube/video-stats/:videoId', async (req, res) => {
+  const videoId = req.params.videoId;
+  try {
+    const data = await youtubeApi.getVideoStats(videoId);
+    saveCachedYouTubeVideo(videoId, data);
+    res.json({ ok: true, data, cached: false });
+  } catch (e) {
+    res.status(502).json({ error: 'youtube video stats failed: ' + e.message });
+  }
+});
+
+// GET /api/youtube/analytics -- 28d watchtime + subs-gained
+app.get('/api/youtube/analytics', (req, res) => {
+  const channelId = req.query.channelId || YT_CHANNEL_ID_FOR_STATS;
+  const days = parseInt(req.query.days || '28', 10);
+  const cached = getCachedYouTubeAnalytics(channelId);
+  if (cached) {
+    return res.json({
+      minutes: cached.minutes,
+      hours: Math.round(cached.minutes / 60),
+      averageViewDuration: cached.averageViewDuration,
+      subscribersGained: cached.subscribersGained,
+      views: cached.views,
+      windowDays: days,
+      cached: true,
+      fetchedAt: cached.savedAt,
+    });
+  }
+  res.json({ cached: false, windowDays: days });
+});
+
+// POST /api/youtube/bulk-warmup — kicks off a background job that warms YouTube
+// stats for ALL videos without cache data. Called from the frontend when the
+// Bibliothek tab loads for the first time, so the Top-Views-All-Time list
+// eventually fills up. Job runs in the background, status is tracked in the
+// existing youtube_refresh_jobs table so the frontend can poll progress.
+app.post('/api/youtube/bulk-warmup', async (req, res) => {
+  const channelId = req.query.channelId || YT_CHANNEL_ID_FOR_STATS;
+  const force = req.query.force === 'true';
+
+  const allVideos = getAll("SELECT id, video_id FROM videos WHERE video_id IS NOT NULL AND video_id != '' AND status != 'archived'");
+  const needsWarmup = force ? allVideos : allVideos.filter(v => !getCachedYouTubeVideo(v.video_id));
+
+  if (needsWarmup.length === 0) {
+    return res.json({ ok: true, status: 'noop', message: 'all videos already cached', remaining: 0 });
+  }
+
+  const jobId = require('crypto').randomUUID();
+  run("INSERT INTO youtube_refresh_jobs (job_id, status, progress, total, started_at) VALUES (?, 'running', 0, ?, datetime('now'))",
+      jobId, needsWarmup.length);
+  saveDB();
+  res.json({ ok: true, status: 'started', jobId, total: needsWarmup.length });
+
+  // Background loop with up to 5 parallel workers
+  setImmediate(async () => {
+    const CONCURRENCY = 5;
+    let done = 0;
+    let failed = 0;
+    const updateProgress = (step) => {
+      run("UPDATE youtube_refresh_jobs SET progress = ?, current_step = ? WHERE job_id = ?", done, step, jobId);
+      saveDB();
+    };
+    updateProgress('Bulk-Warmup: 0/' + needsWarmup.length + ' Videos');
+
+    const queue = [...needsWarmup];
+    const workers = Array.from({ length: CONCURRENCY }, async () => {
+      while (queue.length > 0) {
+        const v = queue.shift();
+        if (!v) break;
+        try {
+          const data = await youtubeApi.getVideoStats(v.video_id);
+          saveCachedYouTubeVideo(v.video_id, data);
+          done++;
+          if (done % 5 === 0 || done === needsWarmup.length) {
+            updateProgress('Bulk-Warmup: ' + done + '/' + needsWarmup.length + ' Videos');
+          }
+        } catch (e) {
+          failed++;
+          log.debug('[youtube] bulk-warmup failed for ' + v.video_id + ':', e.message);
+        }
+      }
+    });
+    await Promise.all(workers);
+
+    run("UPDATE youtube_refresh_jobs SET status = 'done', progress = ?, finished_at = datetime('now'), current_step = ? WHERE job_id = ?",
+        done, 'Fertig. ' + done + ' Videos gecachedt' + (failed > 0 ? ', ' + failed + ' fehlgeschlagen' : '') + '.', jobId);
+    saveDB();
+    log.info('[youtube] bulk-warmup fertig: ' + done + '/' + needsWarmup.length + ' (failed: ' + failed + ')');
+  });
+});
+
+// POST /api/youtube/warm-cache/:videoId — fire-and-forget cache fill for a single video
+// Used by the frontend when the user opens History (or any view with cold videos)
+// so the user sees stats appear gradually instead of all-at-once or never.
+app.post('/api/youtube/warm-cache/:videoId', async (req, res) => {
+  const videoId = req.params.videoId;
+  // Respond immediately, do the work in the background
+  res.json({ ok: true, videoId, status: 'warming' });
+  setImmediate(async () => {
+    try {
+      // Skip if already cached and fresh
+      if (getCachedYouTubeVideo(videoId)) return;
+      const data = await youtubeApi.getVideoStats(videoId);
+      saveCachedYouTubeVideo(videoId, data);
+      log.debug('[youtube] warmed cache for', videoId);
+    } catch (e) {
+      log.warn('[youtube] warm-cache failed for ' + videoId + ':', e.message);
+    }
+  });
+});
+
+// POST /api/youtube/cache-settings
+app.post('/api/youtube/cache-settings', (req, res) => {
+  try {
+    const body = req.body || {};
+    if (Number.isFinite(body.channel)) YT_CACHE_SETTINGS.channelTtlHours = body.channel;
+    if (Number.isFinite(body.video)) YT_CACHE_SETTINGS.videoTtlHours = body.video;
+    if (Number.isFinite(body.analytics)) YT_CACHE_SETTINGS.analyticsTtlHours = body.analytics;
+    if (Number.isFinite(body.maxVideos)) YT_CACHE_SETTINGS.refreshMaxVideos = body.maxVideos;
+    if (Number.isFinite(body.interval)) YT_CACHE_SETTINGS.refreshMinIntervalMinutes = body.interval;
+    saveYTSettings();
+    res.json({ ok: true, settings: YT_CACHE_SETTINGS });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/youtube/cache-settings', (req, res) => {
+  res.json(YT_CACHE_SETTINGS);
+});
+
+// --- Refresh job implementation
+async function runYouTubeRefresh(jobId, channelId, signal) {
+  const updateJob = (status, progress, currentStep, result, error) => {
+    const resultJson = result ? JSON.stringify(result) : null;
+    run("UPDATE youtube_refresh_jobs SET status = ?, progress = ?, current_step = ?, result = ?, error = ?, finished_at = CASE WHEN ? IN ('done', 'failed', 'cancelled') THEN datetime('now') ELSE finished_at END WHERE job_id = ?",
+        status, progress, currentStep || null, resultJson, error || null, status, jobId);
+    saveDB();
+  };
+
+  try {
+    updateJob('running', 1, 'Lade Kanal-Stats...');
+    if (signal.aborted) throw new Error('aborted');
+    const channelStats = await youtubeApi.getChannelStats(channelId);
+    saveCachedYouTubeChannel(channelId, channelStats);
+
+    updateJob('running', 2, 'Lade eigene Videos...');
+    if (signal.aborted) throw new Error('aborted');
+    let videoCount = 0;
+    try {
+      const recentVideos = await youtubeApi.getMyRecentVideos(YT_CACHE_SETTINGS.refreshMaxVideos);
+      for (const v of recentVideos) {
+        if (signal.aborted) throw new Error('aborted');
+        try {
+          const videoStats = await youtubeApi.getVideoStats(v.videoId);
+          saveCachedYouTubeVideo(v.videoId, Object.assign({}, v, videoStats));
+          videoCount++;
+          updateJob('running', 2 + Math.floor((videoCount / Math.max(1, recentVideos.length)) * 1),
+            'Videos gecachedt: ' + videoCount + '/' + recentVideos.length);
+        } catch (e) {
+          log.warn('[youtube] video ' + v.videoId + ' failed:', e.message);
+        }
+      }
+    } catch (e) {
+      log.warn('[youtube] getMyRecentVideos failed (OAuth may not be set up):', e.message);
+    }
+
+    updateJob('running', 3, 'Lade Analytics (28d)...');
+    if (signal.aborted) throw new Error('aborted');
+    try {
+      const analytics = await youtubeApi.getMyAnalytics({ days: 28,
+        metrics: 'views,estimatedMinutesWatched,averageViewDuration,subscribersGained' });
+      const headers = analytics.columnHeaders || [];
+      const row = (analytics.rows && analytics.rows[0]) || [];
+      const flat = {};
+      headers.forEach((h, i) => { flat[h.name] = row[i]; });
+      // Normalize YouTube Analytics naming to Contentix field names
+      if ('estimatedMinutesWatched' in flat) {
+        flat.minutes = flat.estimatedMinutesWatched;
+      }
+      saveCachedYouTubeAnalytics(channelId, flat);
+    } catch (e) {
+      log.warn('[youtube] analytics failed (OAuth may not be set up):', e.message);
+    }
+
+    updateJob('running', 4, 'Aktualisiere Video-Daten...');
+    const allVideos = getAll("SELECT id, video_id FROM videos WHERE video_id IS NOT NULL AND video_id != '' AND status != 'archived'");
+    let updated = 0;
+    for (const v of allVideos) {
+      if (signal.aborted) throw new Error('aborted');
+      const cached = getCachedYouTubeVideo(v.video_id);
+      if (cached && cached.publishedAt) {
+        run('UPDATE videos SET published_date = COALESCE(?, published_date) WHERE id = ? AND published_date IS NULL',
+            cached.publishedAt, v.id);
+        updated++;
+      }
+    }
+
+    updateJob('done', 4, 'Fertig.', {
+      channel: channelStats,
+      videosCached: videoCount,
+      videosUpdated: updated,
+    });
+  } catch (e) {
+    if (e.message === 'aborted') {
+      updateJob('cancelled', 0, 'Abgebrochen.');
+    } else {
+      updateJob('failed', 0, null, null, e.message);
+      log.error('[youtube] refresh failed:', e.message);
+    }
+  }
 }
 
+// --- vidIQ watchtime block follows below
+
+// (vidIQ watchtime helpers removed in Phase 2 refactor — use /api/youtube/analytics instead)
 app.get('/api/vidiq/watchtime', async (req, res) => {
   const channelId = CHANNEL_ID_FOR_WATCHTIME;
   const cached = getCachedWatchtime(channelId);
@@ -1060,7 +1454,7 @@ for (const fmt of ['long', 'short']) {
 app.post('/api/vidiq/refresh', (req, res) => {
   log.info('[vidIQ] Refresh gestartet');
   const { randomUUID } = require('crypto');
-  const jobId = randomUUID();
+  const jobId = require('crypto').randomUUID();
   const CHANNEL_ID = 'UC-YmLEIgdESaoVN3ZKNT_QA';
 
   try {

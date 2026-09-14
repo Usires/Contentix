@@ -181,7 +181,7 @@
   font-weight: 500;
 }
 
-.kanban-card__tag--vidiq {
+.kanban-card__tag--youtube {
   background: rgba(74, 144, 164, 0.12);
   color: var(--celtic-blue);
 }
@@ -431,7 +431,7 @@
   transition: width 0.3s ease;
 }
 
-/* ─── Stats pulse on vidIQ update ─────────────────────────────────────────── */
+/* ─── Stats pulse on YouTube data update (Phase 2) ─────────────────────────── */
 @keyframes statsPulse {
   0%   { background: transparent; }
   30%  { background: rgba(124, 92, 191, 0.15); }

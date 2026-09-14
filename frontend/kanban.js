@@ -322,7 +322,7 @@ async function triggerNixResearch(cardId) {
   _runningResearchJobs.add(cardId);
   let toastId;
   try {
-    // 2) Job triggern (Vidi 🔭, ca. 30–50 vidIQ-Credits, 1–3 Min)
+    // 2) Job triggern (Vidi 🔭, nutzt YouTube Data API, ca. 1–3 Min)
     const res = await fetch(`${API}/research/${cardId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -617,7 +617,7 @@ function openCardModal(cardId = null, defaultColumn = 'ideas', prefillDate = nul
       form.dataset.editId = cardId;
       form.status.value = col; // Hidden input for handleCardSubmit
 
-      // Show delete button only for manually created cards (not vidIQ-synced entries)
+      // Show delete button only for manually created cards (not YouTube-synced entries)
       const deleteBtn = document.getElementById('kanbanDeleteBtn');
       if (deleteBtn) deleteBtn.style.display = (!card.video_id) ? 'inline-block' : 'none';
 

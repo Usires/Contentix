@@ -794,3 +794,146 @@
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
+
+/* ==========================================================================
+   OVERFLOW POPOVER — "+N more" disclosure for dense day-cells
+   Lives on document.body, so plain CSS positioning (no scope issues).
+   ========================================================================== */
+
+.time-bucket__more {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  padding: 3px 6px;
+  background: rgba(124, 92, 191, 0.12);
+  border: 1px dashed rgba(124, 92, 191, 0.5);
+  border-radius: 3px;
+  color: var(--cal-header-fg);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  letter-spacing: 0.02em;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.time-bucket__more:hover {
+  background: rgba(124, 92, 191, 0.28);
+  border-color: var(--nix-violet);
+  transform: translateY(-1px);
+}
+.time-bucket__more:active {
+  transform: translateY(0);
+}
+
+.overflow-popover {
+  position: absolute;
+  z-index: 1000;
+  min-width: 280px;
+  max-width: 360px;
+  max-height: 480px;
+  background: var(--bg-surface, #1f1b2e);
+  border: 1px solid var(--nix-violet, #7c5cbf);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(124, 92, 191, 0.15);
+  font-family: inherit;
+  color: var(--cal-header-fg, #e8e3f5);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.overflow-popover__header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg-cal-header, var(--nix-violet, #7c5cbf));
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.85rem;
+  position: relative;
+}
+.overflow-popover__date {
+  font-weight: 700;
+  color: #fff;
+}
+.overflow-popover__bucket {
+  font-size: 0.75rem;
+  opacity: 0.85;
+  padding: 1px 6px;
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 3px;
+}
+.overflow-popover__count {
+  margin-left: auto;
+  font-size: 0.72rem;
+  opacity: 0.7;
+  font-weight: 500;
+}
+.overflow-popover__close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s ease;
+}
+.overflow-popover__close:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.overflow-popover__list {
+  overflow-y: auto;
+  max-height: 400px;
+  padding: 4px 0;
+}
+
+.overflow-popover__item {
+  display: grid;
+  grid-template-columns: 48px 20px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background 0.12s ease, border-left-color 0.12s ease;
+}
+.overflow-popover__item:hover {
+  background: rgba(124, 92, 191, 0.18);
+  border-left-color: var(--nix-violet, #7c5cbf);
+}
+
+.overflow-popover__time {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--cal-header-fg, #e8e3f5);
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+.overflow-popover__icon {
+  font-size: 0.9rem;
+  text-align: center;
+}
+.overflow-popover__title {
+  font-size: 0.85rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.overflow-popover__author {
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+/* Color echoes for status (consistent with .calendar-event--*) */
+.overflow-popover__item.calendar-event--planned { border-left-color: rgba(255, 200, 87, 0.6); }
+.overflow-popover__item.calendar-event--recording { border-left-color: rgba(255, 120, 87, 0.7); }
+.overflow-popover__item.calendar-event--published { border-left-color: rgba(120, 200, 120, 0.7); }
+.overflow-popover__item.calendar-event--past { opacity: 0.55; }

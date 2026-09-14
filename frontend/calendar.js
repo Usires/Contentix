@@ -8,6 +8,15 @@ let currentView = 'month'; // 'month' | 'week'
 let selectedDay = null;
 let weekIndex = 0; // 0 = first week of month, 1 = second week, ...
 
+// ─── Constants ──────────────────────────────────────────────────────────────
+// Max events shown per time-bucket inside a day-cell. Overflow gets a
+// "+N more" disclosure button → opens a popover with the full list.
+// Keeps day-cell heights bounded even on heavy experiment days.
+const MAX_VISIBLE_PER_BUCKET = 3;
+
+// Serialized events for overflow popover (so onclicks survive innerHTML roundtrip)
+let _overflowPopoverData = {};
+
 // Note: videos are read from the central store (ADR-001 Phase 3).
 // We keep the local `getAllCards()` helper as a thin store.select wrapper.
 function getAllCards() {
@@ -216,13 +225,23 @@ function renderCalendarDay(year, month, day, isOtherMonth, today, isCurrentMonth
   
   function renderBucket(label, evs) {
     if (evs.length === 0) return '';
+    const visible = evs.slice(0, MAX_VISIBLE_PER_BUCKET);
+    const overflow = evs.length - visible.length;
+
+    // Serialize overflow events by id (so onclicks survive innerHTML rebuild)
+    if (overflow > 0) {
+      const overflowIds = evs.map(e => e.id);
+      _overflowPopoverData[dateStr] = _overflowPopoverData[dateStr] || {};
+      _overflowPopoverData[dateStr][label] = overflowIds;
+    }
+
     return `
       <div class="time-bucket">
         <div class="time-bucket__label">${label}</div>
-        ${evs.map(e => {
+        ${visible.map(e => {
           const statusClass = e.status === 'published' ? 'published' : e.status === 'recording' ? 'recording' : 'planned';
           const icon = e.status === 'published' ? '📺' : e.status === 'recording' ? '🎬' : '📋';
-          // vidIQ-sourced = has a video_id from YouTube (published + has video_id)
+          // YouTube-sourced = has a video_id from YouTube (published + has video_id)
           const isVidiq = e.status === 'published' && e.video_id;
           const isDraggable = e.status !== 'published';
           const draggableAttr = isDraggable
@@ -242,6 +261,12 @@ function renderCalendarDay(year, month, day, isOtherMonth, today, isCurrentMonth
             <span class="calendar-event__author" title="Owner: ${authorName}">${authorIcon}</span>
           </div>`;
         }).join('')}
+        ${overflow > 0 ? `
+          <button type="button" class="time-bucket__more"
+                  onclick="event.stopPropagation(); openOverflowPopover('${dateStr}', '${escapeHtml(label)}')"
+                  title="Alle ${evs.length} Einträge anzeigen">
+            +${overflow} weitere
+          </button>` : ''}
       </div>`;
   }
   
@@ -643,6 +668,145 @@ function handleDayColDrop(event, targetDate, targetBucket) {
     .catch(err => {
       showToast && showToast('Fehler beim Verschieben: ' + err.message, 'error');
     });
+}
+
+/* ==========================================================================
+   OVERFLOW POPOVER — "+N more" disclosure for day-cells with >3 events/bucket
+   Lives on document.body so calendar re-renders don't kill it.
+   ========================================================================== */
+let _overflowPopoverEl = null;
+
+function ensureOverflowPopoverEl() {
+  if (_overflowPopoverEl && document.body.contains(_overflowPopoverEl)) return _overflowPopoverEl;
+  _overflowPopoverEl = document.createElement('div');
+  _overflowPopoverEl.id = 'calendarOverflowPopover';
+  _overflowPopoverEl.className = 'overflow-popover';
+  _overflowPopoverEl.style.display = 'none';
+  document.body.appendChild(_overflowPopoverEl);
+  return _overflowPopoverEl;
+}
+
+function openOverflowPopover(dateStr, bucketLabel) {
+  const popover = ensureOverflowPopoverEl();
+  const dayData = _overflowPopoverData[dateStr] || {};
+  const ids = dayData[bucketLabel] || [];
+  const allCards = getAllCards() || [];
+  const cards = ids
+    .map(id => allCards.find(c => c.id === id))
+    .filter(Boolean)
+    .sort((a, b) => (a.planned_date || '').localeCompare(b.planned_date || ''));
+
+  if (cards.length === 0) {
+    if (popover) popover.style.display = 'none';
+    return;
+  }
+
+  // Format date for header: YYYY-MM-DD → Sa, 4. Juli 2026
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  const dayNames = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+  const monthNames = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+  const dateHeader = `${dayNames[dt.getDay()]}, ${d}. ${monthNames[m - 1]} ${y}`;
+
+  const itemsHtml = cards.map(e => {
+    const statusClass = e.status === 'published' ? 'published' : e.status === 'recording' ? 'recording' : 'planned';
+    const icon = e.status === 'published' ? '📺' : e.status === 'recording' ? '🎬' : '📋';
+    const isVidiq = e.status === 'published' && e.video_id;
+    const isPast = dateStr < new Date().toISOString().split('T')[0];
+    const cardClass = isPast ? 'calendar-event--past' : 'calendar-event--' + statusClass;
+    const dateSrc = e.planned_date || e.published_date || '';
+    const timeStr = dateSrc.split('T')[1]?.substring(0, 5) || '';
+    const isNix = (e.owner || 'dirk') === 'nix';
+    const authorIcon = isNix ? '🐧' : '🎬';
+    return `
+      <div class="overflow-popover__item ${cardClass}"
+           onclick="closeOverflowPopover(); openCardFromCalendar('${e.id}')">
+        <span class="overflow-popover__time">${timeStr}</span>
+        <span class="overflow-popover__icon">${isVidiq ? '🔴 ' : icon + ' '}</span>
+        <span class="overflow-popover__title">${escapeHtml(e.title)}</span>
+        <span class="overflow-popover__author">${authorIcon}</span>
+      </div>`;
+  }).join('');
+
+  popover.innerHTML = `
+    <div class="overflow-popover__header">
+      <span class="overflow-popover__date">${dateHeader}</span>
+      <span class="overflow-popover__bucket">${escapeHtml(bucketLabel)}</span>
+      <span class="overflow-popover__count">${cards.length} Einträge</span>
+      <button type="button" class="overflow-popover__close" onclick="closeOverflowPopover()" aria-label="Schließen">×</button>
+    </div>
+    <div class="overflow-popover__list">${itemsHtml}</div>
+  `;
+  popover.style.display = 'block';
+
+  // Position next to the trigger button (the +N more button)
+  try {
+    const trigger = document.activeElement && document.activeElement.classList.contains('time-bucket__more')
+      ? document.activeElement
+      : null;
+    if (trigger && popover.getBoundingClientRect) {
+      const rect = trigger.getBoundingClientRect();
+      const popRect = popover.getBoundingClientRect();
+      const margin = 8;
+      let left = rect.left + window.scrollX;
+      let top = rect.bottom + window.scrollY + margin;
+      // Flip up if it would overflow viewport bottom
+      if (top + popRect.height > window.scrollY + window.innerHeight - margin) {
+        top = rect.top + window.scrollY - popRect.height - margin;
+      }
+      // Clamp right edge
+      const maxLeft = window.scrollX + window.innerWidth - popRect.width - margin;
+      if (left > maxLeft) left = maxLeft;
+      if (left < margin) left = margin;
+      popover.style.left = `${left}px`;
+      popover.style.top = `${top}px`;
+    } else {
+      // Fallback: center
+      popover.style.left = '50%';
+      popover.style.top = '50%';
+      popover.style.transform = 'translate(-50%, -50%)';
+    }
+  } catch (e) {
+    console.warn('overflow popover positioning failed', e);
+  }
+
+  // Close on outside-click or Escape. Use capture phase for keydown so we
+  // run BEFORE app.js's document-level keydown handler, which calls
+  // closeModal() unconditionally and crashes if no modal is open.
+  setTimeout(() => {
+    document.addEventListener('click', _outsideClickHandler);
+    document.addEventListener('keydown', _escapeHandler, true);
+  }, 0);
+}
+
+function closeOverflowPopover() {
+  if (_overflowPopoverEl) _overflowPopoverEl.style.display = 'none';
+  document.removeEventListener('click', _outsideClickHandler);
+  document.removeEventListener('keydown', _escapeHandler, true);
+}
+
+function _outsideClickHandler(e) {
+  if (!_overflowPopoverEl) return;
+  if (_overflowPopoverEl.contains(e.target)) return;
+  if (e.target.classList && e.target.classList.contains('time-bucket__more')) return;
+  closeOverflowPopover();
+  // Stop propagation: app.js has a top-level document click handler that
+  // calls closeModal() which crashes if no modal is open. Our popover is on
+  // body and shouldn't trigger app-level modal logic.
+  e.stopPropagation();
+}
+
+function _escapeHandler(e) {
+  if (e.key !== 'Escape') return;
+  const popoverOpen = _overflowPopoverEl && _overflowPopoverEl.style.display !== 'none';
+  closeOverflowPopover();
+  // If our popover was the one that handled Escape, prevent the app-level
+  // Escape handler in app.js from also running closeModal() (which crashes
+  // when no modal is open). Other Escape handlers (shortcuts, palette) still
+  // run because we only stop propagation when we actually closed something.
+  if (popoverOpen) {
+    e.stopImmediatePropagation();
+  }
 }
 
 /* ─── Helpers via utils.js ────────────────────────────────────────────────── */

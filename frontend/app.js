@@ -28,10 +28,8 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(updateNextVideo, 60000);
   loadChannelStats();
   loadExpeditionsList();
-  document.getElementById('vidiqRefreshBtn')?.addEventListener('click', refreshVidiq);
-  loadVidiqCredits(); // Initial fetch so the user always sees current balance
-  setVidiqIdleLabel(); // Show last sync time on page load
-  // Load version from API
+  document.getElementById('youtubeRefreshBtn')?.addEventListener('click', refreshYouTube);
+      // Load version from API
   fetch(`${API}/health`)
     .then(r => r.json())
     .then(d => { const el = document.getElementById('sidebarVersion'); if (el && d.version) el.textContent = `v${d.version}`; })
@@ -139,7 +137,7 @@ function setupFilters() {
   });
 }
 
-// ─── vidIQ Refresh Helpers ────────────────────────────────────────────────────
+// ─── YouTube Refresh Helpers ────────────────────────────────────────────────────
 function formatRelativeTime(date) {
   if (!date) return null;
   const now = Date.now();
@@ -155,11 +153,11 @@ function formatRelativeTime(date) {
   return new Date(date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
 }
 
-let vidiqCancelToken = null;
+let youtubeRefreshCancelToken = null;
 
 // Snapshot of credit balance taken right before firing a refresh, so we can
 // show the delta (e.g. "−14 Credits verbraucht") once the job finishes.
-let vidiqCreditsBeforeRefresh = null;
+let youtubePreRefreshState = null;
 
 // Pre-flight credit check thresholds.
 // REFRESH_MIN_CREDITS: below this, refuse to start the refresh entirely
@@ -169,191 +167,83 @@ let vidiqCreditsBeforeRefresh = null;
 const REFRESH_MIN_CREDITS = 10;
 const WARN_LOW_CREDITS = 30;
 
-async function refreshVidiq() {
-  const btn = document.getElementById('vidiqRefreshBtn');
-  const status = document.getElementById('vidiqRefreshStatus');
+async function refreshYouTube() {
+  // Phase 2: replaces refreshVidiq(). YouTube Data API is free and has no
+  // credit-balance concept, so this is much simpler — no balance check, no
+  // No credit warnings or fallback needed (YouTube Data API is free).
+  // poll progress. Cancellable via AbortController.
+  const btn = document.getElementById('youtubeRefreshBtn');
+  const status = document.getElementById('youtubeRefreshStatus');
 
   function setState(label, cls, btnTxt, btnDisabled) {
     status.textContent = label;
-    status.className = 'vidiq-refresh-status' + (cls ? ` ${cls}` : '');
+    status.className = 'youtube-refresh-status' + (cls ? ` ${cls}` : '');
     if (btnTxt) btn.textContent = btnTxt;
     btn.disabled = btnDisabled !== undefined ? btnDisabled : true;
   }
 
-  function updateSidebarStats(data) {
-    document.getElementById('logbuchSubs').textContent = data.subs || '—';
-    document.getElementById('logbuchViews').textContent = data.views || '—';
-    document.getElementById('logbuchWatchtime').textContent = data.watchtimeHours ? data.watchtimeHours + ' Std.' : '—';
-    document.getElementById('logbuchVideos').textContent = data.videoCount ?? '—';
-  }
-
-  // Status text + button label for the very first tick. Will be replaced
-// immediately by the pre-flight check below if credits are empty.
-setState('Prüfe vidIQ-Credits…', 'vidiq-refresh-status--loading', '⟳ vidIQ Refresh');
-  vidiqCancelToken = new AbortController();
+  // Reuse youtubeRefreshCancelToken for now (we'll rename if/when the button gets renamed).
+  // Existing event handler at line 31 also points to this variable, so we
+  // don't need to rewire anything.
+  youtubeRefreshCancelToken = new AbortController();
+  setState('YouTube Refresh startet...', 'youtube-refresh-status--loading', '⟳ YouTube Refresh');
 
   try {
-    // Snapshot credit balance so we can show "X Credits verbraucht" on done.
-    // Also gate the refresh on REFRESH_MIN_CREDITS — the MCP call would
-    // just fail and waste ~30s otherwise.
-    //
-    // A cached `balance: {}` (e.g. from a previous refresh where the balance
-    // parse failed) used to trap us in a 0-credit loop because the gate
-    // bailed forever on the stale blob. The fix: when the cached balance is
-    // missing/empty OR zero, force a live /api/vidiq/balance-live read which
-    // (a) costs 0 credits per the MCP pricing and (b) self-heals the cache.
-    async function readBalance({ live } = {}) {
-      const url = live ? `${API}/vidiq/balance-live` : `${API}/vidiq/stats`;
-      const r = await fetch(url);
-      if (!r.ok) return null;
-      const d = await r.json();
-      return (d && d.balance && typeof d.balance === 'object' && Object.keys(d.balance).length > 0)
-        ? d.balance
-        : null;
-    }
-
-    function totalFromBalance(b) {
-      if (!b) return null;
-      return (b.renewableCredits ?? 0) + (b.addOnCredits ?? 0);
-    }
-
-    try {
-      let balance = await readBalance();
-      let liveAttempted = false;
-      let liveFailed = false;
-      // If the cache read came back empty or zero, attempt one live read before
-      // deciding to hard-stop. This is the "0-credit loop" escape hatch.
-      if (!balance || (totalFromBalance(balance) ?? 0) <= 0) {
-        liveAttempted = true;
-        try {
-          const live = await readBalance({ live: true });
-          if (live) balance = live;
-          else liveFailed = true;
-        } catch (_) {
-          liveFailed = true;
-        }
-      }
-      if (balance) {
-        vidiqCreditsBeforeRefresh = totalFromBalance(balance);
-        // Hard stop: no credits at all → don't even try.
-        if (vidiqCreditsBeforeRefresh <= 0) {
-          const resetAt = balance.renewableResetsAt ? new Date(balance.renewableResetsAt) : null;
-          const resetStr = resetAt
-            ? resetAt.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-            : 'unbekannt';
-          setState(`✗ vidIQ-Credits leer — Reset ${resetStr}`, 'vidiq-refresh-status--error', '⟳ Retry');
-          btn.disabled = false;
-          return;
-        }
-        // Soft warn: low credits → show a yellow notice but still proceed.
-        // The status line stays for one tick so the user sees it before
-        // the first poll overwrites it with the step label.
-        if (vidiqCreditsBeforeRefresh < WARN_LOW_CREDITS) {
-          setState(`⚠ Nur ${vidiqCreditsBeforeRefresh} Credits übrig — Refresh startet trotzdem`, 'vidiq-refresh-status--loading', '⟳ Abbruch');
-          await new Promise(r => setTimeout(r, 800));
-        }
-      } else if (liveAttempted && liveFailed) {
-        // We tried a live balance read to escape a stale/empty cache but the
-        // vidIQ MCP itself failed. Don't block — let the refresh run and let
-        // the user see the actual error inside Step 3. But make the situation
-        // visible so a silent retry isn't possible.
-        setState('⚠ Credit-Stand nicht abrufbar (vidIQ-Fehler) — Refresh startet trotzdem', 'vidiq-refresh-status--loading', '⟳ Abbruch');
-        await new Promise(r => setTimeout(r, 1200));
-      }
-    } catch (_) { /* not critical — proceed without gate */ }
-
-    // Fire refresh job
-    const r = await fetch('/api/vidiq/refresh', {
-      method: 'POST',
-      signal: vidiqCancelToken.signal
-    });
-
+    const r = await fetch('/api/youtube/refresh', { method: 'POST', signal: youtubeRefreshCancelToken.signal });
     if (!r.ok) {
       const err = await r.json().catch(() => ({ error: 'Unbekannt' }));
-      setState(`Fehler: ${err.error || r.status}`, 'vidiq-refresh-status--error', '⟳ Retry');
+      setState('Fehler: ' + (err.error || r.status), 'youtube-refresh-status--error', '⟳ Retry');
       btn.disabled = false;
       return;
     }
-
     const { jobId } = await r.json();
-    setState('Daten laden... (0%)', 'vidiq-refresh-status--loading', '⟳ Abbrechen');
+    setState('Daten laden... (0%)', 'youtube-refresh-status--loading', '⟳ Abbrechen');
 
-    // Poll for job status
-    let pollCount = 0;
     const poll = async () => {
-      if (vidiqCancelToken?.signal?.aborted) return;
+      if (youtubeRefreshCancelToken?.signal?.aborted) return;
       try {
-        const sr = await fetch(`/api/vidiq/refresh/status/${jobId}`, { signal: vidiqCancelToken.signal });
+        const sr = await fetch('/api/youtube/refresh/status/' + jobId, { signal: youtubeRefreshCancelToken.signal });
         if (!sr.ok) return;
         const job = await sr.json();
         const pct = job.total > 0 ? Math.round((job.progress / job.total) * 100) : 0;
-        // Prefer the human-readable step label from the server (e.g. "📊 Kanal-Statistiken werden geladen…");
-        // fall back to a generic progress message for very early polls where currentStep isn't set yet.
-        const label = job.currentStep || `Daten laden… (${pct}%)`;
-        setState(`${label} · ${pct}%`, 'vidiq-refresh-status--loading', '⟳ Abbrechen');
-
+        const label = job.currentStep || ('Daten laden... (' + pct + '%)');
+        setState(label + ' · ' + pct + '%', 'youtube-refresh-status--loading', '⟳ Abbrechen');
         if (job.status === 'done') {
-          // After a refresh the credit balance is fresh — show the delta
-          // ("✓ Fertig! — X Credits verbraucht") so the user knows the cost.
-          if (job.result && job.result.balance && vidiqCreditsBeforeRefresh !== null) {
-            const newTotal = (job.result.balance.renewableCredits || 0) + (job.result.balance.addOnCredits || 0);
-            const delta = vidiqCreditsBeforeRefresh - newTotal;
-            const costStr = delta > 0 ? ` · ${delta} Credits verbraucht` : '';
-            setState(`✓ Fertig!${costStr}`, 'vidiq-refresh-status--done', '✓');
-            vidiqCreditsBeforeRefresh = null;
-          } else {
-            setState('✓ Fertig!', 'vidiq-refresh-status--done', '✓');
-          }
-          if (job.result) updateSidebarStats(job.result);
-          if (typeof pulseSidebarStats === 'function') pulseSidebarStats();
-          setTimeout(() => {
-            fetch('/api/vidiq/channel-stats').then(async (tr) => {
-              if (tr.ok) updateSidebarStats(await tr.json());
-            }).catch(() => {});
-            // Watchtime is now in vidiq_cache under _watchtime (saved as Step 6
-            // of the refresh). Pull it from its own endpoint so the sidebar
-            // shows the fresh value immediately.
-            loadWatchtime();
-            // Refresh the credit balance display with the post-refresh value.
-            loadVidiqCredits();
-            btn.textContent = '⟳ vidIQ Refresh';
-            btn.disabled = false;
-            contentixReload();
-          }, 2000);
+          const cached = job.result && job.result.videosCached != null
+            ? ` (${job.result.videosCached} Videos)`
+            : '';
+          setState('✓ Fertig!' + cached, 'youtube-refresh-status--done', '✓');
+          // Refresh sidebar stats from the new cache
+          loadStats();
+          setTimeout(() => { btn.disabled = false; }, 1500);
           return;
         }
-
-        if (job.status === 'error') {
-          setState(`Fehler: ${job.error || 'Unbekannt'}`, 'vidiq-refresh-status--error', '⟳ Retry');
+        if (job.status === 'failed') {
+          setState('✗ Fehler: ' + (job.error || 'unbekannt'), 'youtube-refresh-status--error', '⟳ Retry');
           btn.disabled = false;
           return;
         }
-
-        // Still running — poll again in 2s
-        pollCount++;
-        setTimeout(poll, 2000);
-      } catch(e) {
-        if (e.name !== 'AbortError') {
-          setState(`Netzfehler: ${e.message}`, 'vidiq-refresh-status--error', '⟳ Retry');
+        if (job.status === 'cancelled') {
+          setState('Abgebrochen.', 'youtube-refresh-status--error', '⟳ Retry');
           btn.disabled = false;
+          return;
         }
+        setTimeout(poll, 1500);
+      } catch (e) {
+        if (e.name === 'AbortError') return;
+        // transient network blip — retry next tick
+        setTimeout(poll, 3000);
       }
     };
-
-    poll();
-
+    setTimeout(poll, 500);
   } catch (e) {
-    if (e.name === 'AbortError') {
-      setState('Abgebrochen', '', '⟳ vidIQ Refresh');
-    } else {
-      setState(`Netzfehler: ${e.message}`, 'vidiq-refresh-status--error', '⟳ Retry');
-    }
+    if (e.name === 'AbortError') return;
+    setState('Fehler: ' + e.message, 'youtube-refresh-status--error', '⟳ Retry');
     btn.disabled = false;
   }
 }
-
 function cancelVidiqRefresh() {
-  if (vidiqCancelToken) vidiqCancelToken.abort();
+  if (youtubeRefreshCancelToken) youtubeRefreshCancelToken.abort();
 }
 
 function contentixReload() {
@@ -368,16 +258,16 @@ function contentixReload() {
   } else if (bibliothekEl && bibliothekEl.style.display !== 'none') {
     if (typeof loadBibliothek === 'function') loadBibliothek();
   }
-  // scripts/settings views: no vidIQ data to reload
+  // scripts/settings views: no YouTube data to reload either
 }
 
 function setVidiqIdleLabel() {
-  const status = document.getElementById('vidiqRefreshStatus');
+  const status = document.getElementById('youtubeRefreshStatus');
   if (!status) return;
-  fetch('/api/vidiq/channel-stats').then(r => r.ok ? r.json() : null).then(data => {
+  fetch('/api/youtube/channel-stats').then(r => r.ok ? r.json() : null).then(data => {
     if (data && data._fetched_at) {
       status.textContent = `Letztes Update: ${formatRelativeTime(data._fetched_at)}`;
-      status.className = 'vidiq-refresh-status';
+      status.className = 'youtube-refresh-status';
     }
   }).catch(() => {});
 }
@@ -476,6 +366,72 @@ function restoreTheme() {
   setTheme(saved);
 }
 
+// ─── YouTube cache settings (Phase 2) ─────────────────────────────────────────
+function loadYouTubeCacheSettings() {
+  // Defaults (used if server is unreachable or first-time load)
+  const defaults = {
+    channel: 1, video: 24, analytics: 24, maxVideos: 10, interval: 5,
+  };
+  // Try server first (authoritative)
+  fetch('/api/youtube/cache-settings')
+    .then(r => r.ok ? r.json() : null)
+    .then(serverSettings => {
+      // Fall back to localStorage, then defaults
+      const saved = JSON.parse(localStorage.getItem('yt_cache_settings') || '{}');
+      const s = serverSettings || Object.assign({}, defaults, saved);
+      const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+      setVal('yt-cache-channel', s.channelTtlHours ?? s.channel ?? defaults.channel);
+      setVal('yt-cache-video', s.videoTtlHours ?? s.video ?? defaults.video);
+      setVal('yt-cache-analytics', s.analyticsTtlHours ?? s.analytics ?? defaults.analytics);
+      setVal('yt-refresh-max', s.refreshMaxVideos ?? s.maxVideos ?? defaults.maxVideos);
+      setVal('yt-refresh-interval', s.refreshMinIntervalMinutes ?? s.interval ?? defaults.interval);
+    })
+    .catch(() => {
+      // Offline / server down: use localStorage or defaults
+      const saved = JSON.parse(localStorage.getItem('yt_cache_settings') || '{}');
+      const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+      setVal('yt-cache-channel', saved.channel ?? defaults.channel);
+      setVal('yt-cache-video', saved.video ?? defaults.video);
+      setVal('yt-cache-analytics', saved.analytics ?? defaults.analytics);
+      setVal('yt-refresh-max', saved.maxVideos ?? defaults.maxVideos);
+      setVal('yt-refresh-interval', saved.interval ?? defaults.interval);
+    });
+}
+
+function saveYouTubeCacheSettings() {
+  const getNum = id => parseFloat(document.getElementById(id).value);
+  const getInt = id => parseInt(document.getElementById(id).value, 10);
+  const settings = {
+    channel: getNum('yt-cache-channel'),
+    video: getNum('yt-cache-video'),
+    analytics: getNum('yt-cache-analytics'),
+    maxVideos: getInt('yt-refresh-max'),
+    interval: getInt('yt-refresh-interval'),
+  };
+  localStorage.setItem('yt_cache_settings', JSON.stringify(settings));
+  const statusEl = document.getElementById('yt-cache-saved-status');
+  fetch('/api/youtube/cache-settings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(settings),
+  }).then(r => {
+    if (r.ok) {
+      statusEl.textContent = '✅ gespeichert';
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    } else {
+      statusEl.textContent = '⚠️ Server-Fehler';
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    }
+  }).catch(() => {
+    statusEl.textContent = '⚠️ Server nicht erreichbar — lokal gespeichert';
+    setTimeout(() => { statusEl.textContent = ''; }, 3000);
+  });
+}
+
+// Hook into the existing page-load flow
+document.addEventListener('DOMContentLoaded', loadYouTubeCacheSettings);
+
+
 function restoreView() {
   const saved = getCookie('contentix_view');
   const view = saved || 'bibliothek';
@@ -524,7 +480,10 @@ function setupNav() {
 // ─── Logbuch: Channel Stats ──────────────────────────────────────────────
 async function loadStats() {
   try {
-    const res = await fetch(`${API}/vidiq/channel-stats`);
+    // Phase 2: switched from /api/vidiq/channel-stats to /api/youtube/channel-stats (kept as a comment for git-blame continuity)
+    // (vidIQ MCP replaced by self-hosted YouTube MCP at :8190). Same response shape, just YouTube fields now.
+    // (subs/views/videoCount/cached/_fetched_at), so the rest of this function is unchanged.
+    const res = await fetch(`${API}/youtube/channel-stats`);
     if (!res.ok) throw new Error('API error');
     const data = await res.json();
 
@@ -533,8 +492,13 @@ async function loadStats() {
     document.getElementById('logbuchViews').textContent = data.views ? formatNumber(data.views) : '—';
     document.getElementById('logbuchVideos').textContent = data.videoCount ?? '—';
 
-    // Watchtime is loaded separately (cached 6h in vidiq_cache under _watchtime).
-    // Fire-and-forget: don't block the rest of the sidebar on a slow vidIQ call.
+    // Channel avatar + handle (Phase 2 — YouTube thumbnail feature)
+    const avatar = document.getElementById('channelAvatar');
+    if (avatar && data.thumbnail) avatar.src = data.thumbnail;
+    const handleEl = document.getElementById('channelHandle');
+    if (handleEl && data.customUrl) handleEl.textContent = data.customUrl;
+
+    // Watchtime now from /api/youtube/analytics (OAuth-backed, free, 28d window)
     loadWatchtime();
 
     // Letzte Expedition widget removed — now in Bibliothek
@@ -549,7 +513,7 @@ async function loadStats() {
   updateNextVideo();
 }
 
-// Fetch the watchtime in the background. 5 vidIQ credits on a cache miss,
+// Fetch the watchtime in the background (Phase 2: free, no credits).
 // 0 on a hit. The sidebar shows a spinner until it lands.
 async function loadWatchtime() {
   const el = document.getElementById('logbuchWatchtime');
@@ -557,87 +521,24 @@ async function loadWatchtime() {
   const previous = el.textContent;
   if (el.textContent === '—') el.textContent = '…';
   try {
-    const r = await fetch(`${API}/vidiq/watchtime`);
+    // Phase 2: YouTube Analytics via /api/youtube/analytics
+    // Response shape: { minutes, hours, averageViewDuration, subscribersGained, views, windowDays, cached, fetchedAt }
+    const r = await fetch(`${API}/youtube/analytics`);
     if (!r.ok) throw new Error(`API ${r.status}`);
     const w = await r.json();
     el.textContent = w.hours ? `${formatNumber(w.hours)} Std.` : '—';
+    // YouTube returns avgViewDuration in seconds; convert to minutes:seconds for display
+    const avgSec = w.averageViewDuration || 0;
+    const avgStr = avgSec ? `${Math.floor(avgSec/60)}:${String(avgSec%60).padStart(2,'0')} min` : '?';
     el.title = w.cached
-      ? `Cache: ${w.ageHours}h alt · ${w.windowDays}-Tage-Fenster · ${w.avgViewPercentage || '?'}% avg view`
-      : `Frisch geladen · ${w.windowDays}-Tage-Fenster · ${w.avgViewPercentage || '?'}% avg view`;
+      ? `Cache: YouTube Analytics (28d) · ${w.subscribersGained || '?'} neue Subs · Ø ${avgStr}`
+      : `Frisch geladen · 28-Tage-Fenster · ${w.subscribersGained || '?'} neue Subs · Ø ${avgStr}`;
   } catch (_) {
     el.textContent = previous || '—';
   }
 }
 
-// ─── vidIQ Credits Display ─────────────────────────────────────────────────────────
-// Reads the balance from /api/vidiq/stats (cached, so we can call this freely).
-// Shows: "💳 2,847 / 2,000 credits" with a tooltip explaining the bucket split.
-// When balance is critical (< 20 credits), the bar turns amber; at 0 it's red.
-async function loadVidiqCredits() {
-  const wrap = document.getElementById('vidiqCredits');
-  if (!wrap) return;
 
-  // Reads the cached balance from /api/vidiq/stats. If the balance blob is
-  // empty (no renewableCredits/addOnCredits fields — e.g. after a parse failure
-  // or while vidIQ is down), we fall back to /api/vidiq/balance-live once.
-  // Only if that also fails do we show "— nicht verfügbar" instead of "0".
-  async function fetchBalance(live = false) {
-    const url = live ? `${API}/vidiq/balance-live` : `${API}/vidiq/stats`;
-    const r = await fetch(url);
-    if (!r.ok) return null;
-    const d = await r.json();
-    // /vidiq/stats returns { balance: {...} }; /balance-live returns { balance: {...} }
-    const bal = (d && d.balance && typeof d.balance === 'object') ? d.balance : null;
-    if (!bal) return null;
-    // Must have at least one of the three balance fields to be considered valid.
-    if (bal.renewableCredits == null && bal.addOnCredits == null && bal.maxRenewableCredits == null) {
-      return null;
-    }
-    return bal;
-  }
-
-  try {
-    let bal = await fetchBalance(false);
-    // Cache empty or vidIQ still down → try live read before showing "0".
-    if (!bal) {
-      try { bal = await fetchBalance(true); } catch (_) { /* keep null */ }
-    }
-
-    if (!bal) {
-      // Balance genuinely unavailable — show "—" not "0" (0 implies "no credits",
-      // which is wrong when we just couldn't reach vidIQ).
-      wrap.querySelector('.vidiq-credits__value').textContent = '—';
-      wrap.querySelector('.vidiq-credits__hint').textContent = 'nicht verfügbar';
-      wrap.classList.remove('vidiq-credits--low', 'vidiq-credits--zero');
-      return;
-    }
-
-    const renewable = bal.renewableCredits ?? 0;
-    const addOn = bal.addOnCredits ?? 0;
-    const maxRenewable = bal.maxRenewableCredits ?? 0;
-    const total = renewable + addOn;
-    const resetsAt = bal.renewableResetsAt ? new Date(bal.renewableResetsAt) : null;
-    const fmt = (n) => new Intl.NumberFormat('de-DE').format(n);
-    const resetStr = resetsAt
-      ? resetsAt.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-      : null;
-    wrap.querySelector('.vidiq-credits__value').textContent =
-      maxRenewable > 0 ? `${fmt(total)} / ${fmt(maxRenewable)}` : `${fmt(total)}`;
-    const hint = wrap.querySelector('.vidiq-credits__hint');
-    hint.textContent = resetStr ? `Reset ${resetStr}` : 'Stand jetzt';
-    wrap.title =
-      `vidIQ API Credits\n` +
-      `Renewable: ${fmt(renewable)} / ${fmt(maxRenewable)}${resetStr ? ` (Reset ${resetStr})` : ''}\n` +
-      `Add-on (Bonus): ${fmt(addOn)}\n` +
-      `Gesamt: ${fmt(total)}`;
-    wrap.classList.toggle('vidiq-credits--low', maxRenewable > 0 && total < maxRenewable * 0.2);
-    wrap.classList.toggle('vidiq-credits--zero', total === 0);
-  } catch (e) {
-    wrap.querySelector('.vidiq-credits__value').textContent = '—';
-    wrap.querySelector('.vidiq-credits__hint').textContent = 'nicht erreichbar';
-    wrap.classList.remove('vidiq-credits--low', 'vidiq-credits--zero');
-  }
-}
 
 // ─── Nächstes Video Widget ───────────────────────────────────────────────
 async function updateNextVideo() {
@@ -695,7 +596,25 @@ async function updateNextVideo() {
   }
 }
 
-// ─── Expeditions-Liste ──────────────────────────────────────────────────────
+
+// ─── Nix Comment (from first video with a comment) ──────────────────────────
+async function loadNixComment() {
+  try {
+    const res = await fetch(`${API}/videos`);
+    if (res.ok) {
+      const videos = await res.json();
+      const commented = videos.find(v => v.nix_comment && v.nix_comment.trim());
+      if (commented) {
+        document.getElementById('nixComment').textContent = commented.nix_comment;
+      }
+    }
+  } catch (_) {
+    // Silent fail
+  }
+}
+
+
+// ─── Expeditions-Liste (Sidebar-Veröffentlichungen) ────────────────────────
 async function loadExpeditionsList() {
   const container = document.getElementById('expeditionsList');
   if (!container) return;
@@ -727,290 +646,8 @@ async function loadExpeditionsList() {
   }
 }
 
-// ─── Channel Stats Widget (Feature 3 & 4) ───────────────────────────────────
 async function loadChannelStats() {
-  try {
-    const res = await fetch(`${API}/vidiq/channel-stats`);
-    if (!res.ok) throw new Error('API error');
-    const data = await res.json();
-    document.getElementById('stat-subs').textContent = formatNumber(data.subs);
-    document.getElementById('stat-views').textContent = formatNumber(data.views);
-    // Watchtime comes from the dedicated /api/vidiq/watchtime endpoint
-    // (cached 6h in vidiq_cache under _watchtime). Pulled in parallel.
-    fetch(`${API}/vidiq/watchtime`).then(async (wr) => {
-      if (!wr.ok) return;
-      const w = await wr.json();
-      const el = document.getElementById('stat-watchtime');
-      el.textContent = w.hours ? `${formatNumber(w.hours)}h` : 'N/A';
-      el.title = w.cached
-        ? `Cache: ${w.ageHours}h alt · 28-Tage-Fenster · ${w.avgViewPercentage || '?'}% avg view`
-        : `Frisch geladen · 28-Tage-Fenster · ${w.avgViewPercentage || '?'}% avg view`;
-    }).catch(() => {});
-    if (data.latestVideo) {
-      document.getElementById('latestVideoTitle').textContent = data.latestVideo.title || 'Unbekannt';
-      document.getElementById('latestVideoLink').href = 'https://youtube.com/watch?v=' + data.latestVideo.videoId;
-      if (data.latestVideo.thumbnail) {
-        document.getElementById('latestVideoThumb').src = data.latestVideo.thumbnail;
-        document.getElementById('latestVideoThumb').style.background = 'none';
-      }
-    } else {
-      document.getElementById('latestVideoTitle').textContent = 'Kein Video gefunden';
-      document.getElementById('latestVideoLink').href = '#';
-    }
-  } catch (_) {
-    document.getElementById('stat-subs').textContent = 'N/A';
-    document.getElementById('stat-views').textContent = 'N/A';
-    document.getElementById('stat-watchtime').textContent = 'N/A';
-    document.getElementById('latestVideoTitle').textContent = 'Fehler beim Laden';
-  }
+  // Phase 2: unified with loadStats() — single source of YouTube data
+  return loadStats();
 }
 
-
-// ─── Nix Comment (from first video with a comment) ──────────────────────────
-async function loadNixComment() {
-  try {
-    const res = await fetch(`${API}/videos`);
-    if (res.ok) {
-      const videos = await res.json();
-      const commented = videos.find(v => v.nix_comment && v.nix_comment.trim());
-      if (commented) {
-        document.getElementById('nixComment').textContent = commented.nix_comment;
-      }
-    }
-  } catch (_) {
-    // Silent fail
-  }
-}
-
-// ─── Keyboard Shortcuts ─────────────────────────────────────────────────────
-document.addEventListener('keydown', (e) => {
-  // Escape always works, everywhere — closes whatever is open
-  if (e.key === 'Escape') {
-    if (isPaletteOpen()) { closeCommandPalette(); return; }
-    if (isShortcutsHelpOpen()) { hideShortcutsHelp(); return; }
-    closeModal(); closeCardModal();
-    if (typeof closeCalendarDayDetail === 'function') closeCalendarDayDetail();
-    return;
-  }
-
-  // Cmd/Ctrl combos work in inputs too (they're explicit user intent)
-  if (e.metaKey || e.ctrlKey) {
-    if (e.key === 'k' || e.key === 'K') {
-      e.preventDefault();
-      openCommandPalette();
-      return;
-    }
-    if (e.key === 's' || e.key === 'S') {
-      // Only intercept when a modal is open
-      if (isCardModalOpen() || isModalOpen()) {
-        e.preventDefault();
-        const form = document.querySelector('#kanbanModal form, #contentModal form');
-        if (form) form.requestSubmit ? form.requestSubmit() : form.submit();
-      }
-      return;
-    }
-    if (e.key === 'n') {
-      e.preventDefault();
-      openModal();
-      return;
-    }
-    if (e.key === 'Enter') {
-      // Only intercept when a modal is open (Card or Content)
-      if (isCardModalOpen() || isModalOpen()) {
-        e.preventDefault();
-        const form = document.querySelector('#kanbanModal form, #contentModal form');
-        if (form) form.requestSubmit ? form.requestSubmit() : form.submit();
-        return;
-      }
-    }
-  }
-
-  // '?' opens the shortcuts help overlay
-  if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
-    e.preventDefault();
-    isShortcutsHelpOpen() ? hideShortcutsHelp() : showShortcutsHelp();
-    return;
-  }
-
-  // Cmd+K/Enter inside the command palette input
-  if (isPaletteOpen() && e.key === 'Enter') {
-    e.preventDefault();
-    selectActivePaletteItem();
-    return;
-  }
-  if (isPaletteOpen() && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-    e.preventDefault();
-    movePaletteSelection(e.key === 'ArrowDown' ? 1 : -1);
-    return;
-  }
-
-  // Single-key shortcuts — skip when typing in form fields
-  if (isTypingInField(e)) return;
-
-  // '+' or 'n' — new card in active column
-  if (e.key === '+' || e.key === 'n') {
-    // Only meaningful on the Workflow/Board view
-    const activeView = document.querySelector('.sidebar__nav-link.active')?.dataset.view;
-    if (activeView === 'ideas') {
-      e.preventDefault();
-      const activeColumn = getActiveBoardColumn() || 'ideas';
-      openCardModal(null, activeColumn);
-    }
-    return;
-  }
-
-  // 1–5 — quick status set in the card modal
-  if (isCardModalOpen() && /^[1-5]$/.test(e.key)) {
-    e.preventDefault();
-    const stepIndex = parseInt(e.key, 10) - 1;
-    const steps = document.querySelectorAll('.status-pipeline__step');
-    if (steps[stepIndex]) steps[stepIndex].click();
-    return;
-  }
-});
-
-// ─── Modal state helpers (so shortcut code can ask "is X open?") ────────────
-function isModalOpen() {
-  const m = document.getElementById('contentModal');
-  return m && m.style.display === 'flex';
-}
-function isCardModalOpen() {
-  const m = document.getElementById('kanbanModal');
-  return m && m.style.display === 'flex';
-}
-
-// ─── Shortcuts Help Overlay ──────────────────────────────────────────────────
-function isShortcutsHelpOpen() {
-  const el = document.getElementById('shortcutsHelp');
-  return el && !el.hasAttribute('hidden');
-}
-function showShortcutsHelp() {
-  const el = document.getElementById('shortcutsHelp');
-  if (el) el.removeAttribute('hidden');
-}
-function hideShortcutsHelp() {
-  const el = document.getElementById('shortcutsHelp');
-  if (el) el.setAttribute('hidden', '');
-}
-
-// Click backdrop / X to close
-document.addEventListener('click', (e) => {
-  if (e.target.matches('[data-close-help]')) hideShortcutsHelp();
-  if (e.target.matches('[data-close-palette]')) closeCommandPalette();
-});
-
-// ─── Command Palette ─────────────────────────────────────────────────────────
-function isPaletteOpen() {
-  const el = document.getElementById('commandPalette');
-  return el && !el.hasAttribute('hidden');
-}
-let _paletteActiveIndex = 0;
-let _paletteItems = [];
-
-function openCommandPalette() {
-  const palette = document.getElementById('commandPalette');
-  const input = document.getElementById('commandPaletteInput');
-  if (!palette || !input) return;
-  palette.removeAttribute('hidden');
-  input.value = '';
-  _paletteActiveIndex = 0;
-  renderPaletteResults('');
-  requestAnimationFrame(() => input.focus());
-}
-
-function closeCommandPalette() {
-  const palette = document.getElementById('commandPalette');
-  if (palette) palette.setAttribute('hidden', '');
-}
-
-function renderPaletteResults(query) {
-  const container = document.getElementById('commandPaletteResults');
-  if (!container) return;
-  // Phase 3: read videos from the central store instead of legacy API.
-  const all = store.select(s => s.videos) || [];
-  const q = (query || '').toLowerCase().trim();
-  let results = all;
-  if (q) {
-    results = all.filter(c => {
-      const hay = [c.title || '', (c.tags || []).join(' '), c.notes || ''].join(' ').toLowerCase();
-      return hay.includes(q);
-    });
-  }
-  results = results.slice(0, 12); // cap at 12 for performance
-
-  if (results.length === 0) {
-    _paletteItems = [];
-    container.innerHTML = q
-      ? `<div class="command-palette__no-results">Keine Karten gefunden für "${escapeHtml(query)}"</div>`
-      : `<div class="command-palette__empty">Tippe um Karten zu suchen…</div>`;
-    return;
-  }
-
-  _paletteItems = results;
-  _paletteActiveIndex = Math.min(_paletteActiveIndex, results.length - 1);
-  container.innerHTML = results.map((c, i) => `
-    <div class="command-palette__item${i === _paletteActiveIndex ? ' is-active' : ''}" data-card-id="${c.id}" data-index="${i}">
-      <div class="command-palette__item-title">${escapeHtml(c.title || '(ohne Titel)')}</div>
-      <div class="command-palette__item-meta">
-        <span>${escapeHtml(c.status || '?')}</span>
-        ${(c.tags && c.tags.length) ? c.tags.slice(0, 3).map(t => `<span class="command-palette__item-tag">${escapeHtml(t)}</span>`).join('') : ''}
-      </div>
-    </div>
-  `).join('');
-
-  // Wire up click + hover
-  container.querySelectorAll('.command-palette__item').forEach(el => {
-    el.addEventListener('click', () => openCardFromPalette(el.dataset.cardId));
-    el.addEventListener('mouseenter', () => {
-      _paletteActiveIndex = parseInt(el.dataset.index, 10);
-      updatePaletteActiveClass();
-    });
-  });
-}
-
-function updatePaletteActiveClass() {
-  document.querySelectorAll('.command-palette__item').forEach((el, i) => {
-    el.classList.toggle('is-active', i === _paletteActiveIndex);
-  });
-}
-
-function movePaletteSelection(delta) {
-  if (_paletteItems.length === 0) return;
-  _paletteActiveIndex = (_paletteActiveIndex + delta + _paletteItems.length) % _paletteItems.length;
-  updatePaletteActiveClass();
-  // Scroll into view
-  const active = document.querySelector('.command-palette__item.is-active');
-  if (active) active.scrollIntoView({ block: 'nearest' });
-}
-
-function selectActivePaletteItem() {
-  if (_paletteItems.length === 0) return;
-  const card = _paletteItems[_paletteActiveIndex];
-  if (card) openCardFromPalette(card.id);
-}
-
-function openCardFromPalette(cardId) {
-  closeCommandPalette();
-  // Phase 3: trigger a fresh video load via the store action so the modal
-  // sees the latest state, then open it.
-  store.actions.loadVideos().then(() => openCardModal(cardId));
-}
-
-// Live-search as user types
-document.addEventListener('input', (e) => {
-  if (e.target && e.target.id === 'commandPaletteInput') {
-    _paletteActiveIndex = 0;
-    renderPaletteResults(e.target.value);
-  }
-});
-
-// ─── Active board column (used by '+' shortcut) ─────────────────────────────
-function getActiveBoardColumn() {
-  // Returns the column-id whose .board__add-card is currently visible, or
-  // the column a card is currently selected in. For now returns the leftmost
-  // visible column. kanban.js's renderBoard() sets up the buttons; we read
-  // the first one.
-  const btns = document.querySelectorAll('.board__add-card');
-  if (btns.length === 0) return null;
-  return btns[0].dataset.column;
-}

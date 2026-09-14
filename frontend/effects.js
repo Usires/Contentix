@@ -84,7 +84,7 @@ function confettiAtColumn(columnId) {
   draw();
 }
 
-/* ─── Stats pulse on vidIQ update ─────────────────────────────────────────── */
+/* ─── Stats pulse on YouTube data update (Phase 2) ─────────────────────────── */
 function pulseSidebarStats() {
   const panel = document.getElementById('channelStats');
   if (!panel) return;

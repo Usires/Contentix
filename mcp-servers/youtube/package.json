@@ -1,0 +1,26 @@
+{
+  "name": "@contentix/youtube-mcp",
+  "version": "0.1.0",
+  "description": "YouTube Data API v3 MCP server (API-Key + OAuth) for Contentix",
+  "private": true,
+  "type": "module",
+  "main": "server.js",
+  "bin": {
+    "contentix-youtube-mcp": "./server.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "auth": "node scripts/oauth-setup.js",
+    "test": "node --test tests/"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "dotenv": "^17.4.2",
+    "express": "^4.18.2",
+    "googleapis": "^180.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

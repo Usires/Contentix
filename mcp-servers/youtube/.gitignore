@@ -1,0 +1,8 @@
+# Local secrets & tokens
+.env
+data/
+node_modules/
+
+# OS / editor
+.DS_Store
+*.swp

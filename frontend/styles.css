@@ -1166,7 +1166,7 @@ body.modal-open {
   cursor: not-allowed;
 }
 
-.vidiq-refresh-status {
+.youtube-refresh-status {
   font-size: 11px;
   color: var(--text-on-dark-secondary);
   min-height: 16px;
@@ -1175,41 +1175,12 @@ body.modal-open {
   font-family: 'JetBrains Mono', monospace;
   opacity: 0.95;
 }
-.vidiq-refresh-status--loading { color: var(--accent); }
-.vidiq-refresh-status--error { color: #e87a7a; }
-.vidiq-refresh-status--done { color: #7ae8a0; }
+.youtube-refresh-status--loading { color: var(--accent); }
+.youtube-refresh-status--error { color: #e87a7a; }
+.youtube-refresh-status--done { color: #7ae8a0; }
 
-/* vidIQ credits display — sits below the refresh button. Subtle by default,
-   amber when balance drops below 20% of the renewable cap, red when zero. */
-.vidiq-credits {
-  margin-top: 6px;
-  padding: 4px 8px;
-  font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-  color: var(--text-on-dark-secondary);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: help;
-  transition: background 0.2s, border-color 0.2s, color 0.2s;
-}
-.vidiq-credits:hover { background: rgba(255, 255, 255, 0.07); }
-.vidiq-credits__icon { font-size: 12px; }
-.vidiq-credits__value { font-weight: 600; color: var(--text-on-dark); }
-.vidiq-credits__hint { margin-left: auto; opacity: 0.7; font-size: 10px; }
-.vidiq-credits--low {
-  background: rgba(255, 180, 50, 0.08);
-  border-color: rgba(255, 180, 50, 0.25);
-}
-.vidiq-credits--low .vidiq-credits__value { color: #ffb432; }
-.vidiq-credits--zero {
-  background: rgba(232, 122, 122, 0.10);
-  border-color: rgba(232, 122, 122, 0.30);
-}
-.vidiq-credits--zero .vidiq-credits__value { color: #e87a7a; }
+/* Phase 2: vidIQ-credits display removed — YouTube Data API is free */
+
 
 /* Settings View */
 .settings-panel {
@@ -1331,6 +1302,54 @@ body.modal-open {
   color: var(--nix-violet);
   letter-spacing: -0.01em;
   text-align: center;
+}
+
+/* Channel brand block: avatar + name + handle (Phase 2 thumbnail feature) */
+.sidebar__channel-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.sidebar__channel-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 2px solid var(--nix-violet);
+  background: var(--bg-tertiary);
+  object-fit: cover;
+  flex-shrink: 0;
+  visibility: hidden;
+}
+
+.sidebar__channel-avatar[src]:not([src=""]) {
+  visibility: visible;
+}
+
+.sidebar__channel-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+.sidebar__channel-name {
+  margin-bottom: 0 !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar__channel-handle {
+  font-size: 12px;
+  color: var(--text-on-dark-secondary);
+  margin: 0;
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar__stats {
@@ -2771,24 +2790,24 @@ kbd {
   background: var(--nix-orange, #e07b4f);
 }
 
-/* Hero */
+/* Hero — kompakter (Phase 2 Polish) */
 .lib-hero {
   display: grid;
-  grid-template-columns: 1.4fr 1fr;
-  gap: 24px;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
   background: var(--bg-card, #fff);
   border: 1px solid var(--border-subtle, #e5e7eb);
-  border-radius: 16px;
-  padding: 20px;
-  margin-bottom: 32px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 24px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.03);
 }
 
 .lib-hero-thumb {
   width: 100%;
-  aspect-ratio: 16/9;
+  aspect-ratio: 21/9;
   background: linear-gradient(135deg, #4a90a4, #7c5cbf);
-  border-radius: 12px;
+  border-radius: 8px;
   position: relative;
   overflow: hidden;
   display: flex;
@@ -2839,22 +2858,22 @@ kbd {
 
 .lib-hero-title {
   font-family: var(--font-display, 'Playfair Display', serif);
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 700;
-  line-height: 1.2;
-  margin-bottom: 12px;
+  line-height: 1.25;
+  margin-bottom: 8px;
   color: var(--text-primary, #1a1a2e);
 }
 
 .lib-hero-hook {
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.45;
   color: var(--text-secondary, #6b7280);
   font-style: italic;
-  padding: 10px 14px;
+  padding: 8px 12px;
   background: var(--nix-soft, #faf8f4);
   border-left: 3px solid var(--nix-orange, #e07b4f);
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 6px 6px 0;
 }
 
 .lib-hero-hook.nix {
@@ -2978,6 +2997,15 @@ kbd {
   color: white;
   opacity: 0.7;
   transition: opacity 0.3s ease, filter 0.3s ease;
+  overflow: hidden;  /* verhindert dass Bild ueber den Container hinauslaeuft */
+}
+
+/* YouTube-Thumbnails sind 4:3 (480x360 fuer hqdefault), Container ist 16:9.
+   object-fit: cover schneidet die Raender oben/unten ab statt schwarze Balken zu zeigen. */
+.lib-card-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 /* Bilder: im Ruhezustand 0.7, bei Hover 1.0 */
@@ -3188,4 +3216,79 @@ kbd {
 .lib-card:hover .lib-card-thumb img {
   transform: scale(1.08);
   filter: brightness(1.12) contrast(1.08) saturate(1.15);
+}
+
+/* YouTube cache settings card layout (Phase 2) */
+.settings-cache-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.settings-cache-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.settings-cache-row:hover {
+  border-color: var(--nix-violet);
+  background: var(--bg-tertiary);
+}
+
+.settings-cache-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.settings-cache-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  grid-column: 1;
+  grid-row: 2;
+  margin-top: 2px;
+}
+
+.settings-cache-row input[type="number"] {
+  width: 80px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 14px;
+  text-align: right;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.settings-cache-row input[type="number"]:focus {
+  outline: none;
+  border-color: var(--nix-violet);
+}
+
+.settings-cache-unit {
+  font-size: 12px;
+  color: var(--text-muted);
+  grid-column: 3;
+  grid-row: 1 / span 2;
+}
+
+.settings-saved-status {
+  margin-left: 12px;
+  font-size: 12px;
+  color: var(--success, #4ade80);
+  display: inline-block;
+  min-width: 60px;
 }

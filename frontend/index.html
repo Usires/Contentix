@@ -34,7 +34,13 @@
       <p class="sidebar__tagline">Dein kreativer Kompass für YouTube</p>
 
       <div class="sidebar__section">
-        <p class="sidebar__channel-name">🎬 The Dirk</p>
+        <div class="sidebar__channel-brand">
+          <img id="channelAvatar" class="sidebar__channel-avatar" src="" alt="" referrerpolicy="no-referrer">
+          <div class="sidebar__channel-text">
+            <p class="sidebar__channel-name">🎬 The Dirk</p>
+            <p class="sidebar__channel-handle" id="channelHandle">@thedirk74</p>
+          </div>
+        </div>
 
         <!-- Nächstes Video Widget — moved up to the top of the action zone -->
         <div class="next-video-widget" id="nextVideoWidget">
@@ -105,18 +111,12 @@
         </div>
       </div>
 
-      <!-- vidIQ Refresh Button + Status -->
-      <div id="vidiqRefreshWrap">
-        <button id="vidiqRefreshBtn" class="sidebar__refresh-btn">
-          ⟳ vidIQ Refresh
+      <!-- YouTube Refresh Button + Status -->
+      <div id="youtubeRefreshWrap">
+        <button id="youtubeRefreshBtn" class="sidebar__refresh-btn">
+          ⟳ YouTube Refresh
         </button>
-        <div id="vidiqRefreshStatus" class="vidiq-refresh-status"></div>
-        <!-- vidIQ credits balance — always visible, updated with every refresh + on page load -->
-        <div id="vidiqCredits" class="vidiq-credits" title="vidIQ API Credits — Reset am Monatsbeginn">
-          <span class="vidiq-credits__icon">💳</span>
-          <span class="vidiq-credits__value">—</span>
-          <span class="vidiq-credits__hint">lade…</span>
-        </div>
+        <div id="youtubeRefreshStatus" class="youtube-refresh-status"></div>
       </div>
 
       <!-- Footer -->
@@ -176,7 +176,7 @@
             <div class="lib-section">
               <div class="lib-section-header">
                 <span class="lib-section-icon">🏆</span>
-                <h3 class="lib-section-title">Evergreens</h3>
+                <h3 class="lib-section-title">Top 6 Viewer Highscores</h3>
                 <span class="lib-section-count">— Top-Views aller Zeiten</span>
               </div>
               <div class="lib-cards" id="topList"></div>
@@ -193,7 +193,7 @@
       <div id="contentView" class="view-panel" style="display: none;">
         <header class="main__header">
           <h1 class="main__title">Expeditionen</h1>
-          <p class="main__subtitle">vidIQ Daten für deinen Kanal.</p>
+          <p class="main__subtitle">YouTube Daten für deinen Kanal.</p>
         </header>
         
         <!-- Latest Video Widget -->
@@ -292,14 +292,48 @@
           </div>
 
           <div class="content-card">
-            <h3>vidIQ API Key</h3>
-            <p>
-              Dein vidIQ API Key wird in der <code>.env</code> Datei verwaltet.
-            </p>
-            <code style="font-size: 12px; background: var(--lavender-light); padding: 4px 8px; border-radius: 4px;">
-              VIDIQ_API_KEY=dein_key_hier
-            </code>
-          </div>
+            <h3>🎬 YouTube-Daten</h3>
+              <p>
+                Cache-Dauern für die YouTube Data API. Niedrige Werte = aktueller,
+                hohe Werte = weniger API-Calls.
+              </p>
+              <div class="settings-cache-grid">
+                <label class="settings-cache-row">
+                  <span class="settings-cache-label">Channel-Stats Cache</span>
+                  <span class="settings-cache-desc">Subs/Views/Videos — wie lange gültig?</span>
+                  <input type="number" id="yt-cache-channel" min="0.5" max="24" step="0.5" value="1">
+                  <span class="settings-cache-unit">Stunden</span>
+                </label>
+                <label class="settings-cache-row">
+                  <span class="settings-cache-label">Video-Stats Cache</span>
+                  <span class="settings-cache-desc">Pro-Video-Views/Likes TTL</span>
+                  <input type="number" id="yt-cache-video" min="1" max="168" step="1" value="24">
+                  <span class="settings-cache-unit">Stunden</span>
+                </label>
+                <label class="settings-cache-row">
+                  <span class="settings-cache-label">Analytics Cache</span>
+                  <span class="settings-cache-desc">Watchtime + Subs-Gained TTL</span>
+                  <input type="number" id="yt-cache-analytics" min="1" max="168" step="1" value="24">
+                  <span class="settings-cache-unit">Stunden</span>
+                </label>
+                <label class="settings-cache-row">
+                  <span class="settings-cache-label">Videos pro Refresh</span>
+                  <span class="settings-cache-desc">Wie viele letzte Uploads beim Refresh?</span>
+                  <input type="number" id="yt-refresh-max" min="1" max="50" step="1" value="10">
+                  <span class="settings-cache-unit">Videos</span>
+                </label>
+                <label class="settings-cache-row">
+                  <span class="settings-cache-label">Min. Refresh-Intervall</span>
+                  <span class="settings-cache-desc">Schutz vor zu häufigem Refresh</span>
+                  <input type="number" id="yt-refresh-interval" min="1" max="60" step="1" value="5">
+                  <span class="settings-cache-unit">Minuten</span>
+                </label>
+              </div>
+              <button class="btn btn--primary" onclick="saveYouTubeCacheSettings()">
+                💾 Cache-Einstellungen speichern
+              </button>
+              <span id="yt-cache-saved-status" class="settings-saved-status"></span>
+            </div>
         </div>
       </div>
 
@@ -402,14 +436,17 @@
   </div>
 
   <!-- App JS -->
+  <!-- Load order matters: app.js defines setupNav() and other globals,
+       so it must come before any module that calls those helpers
+       (kanban.js, calendar.js, etc.). -->
   <script src="utils.js"></script>
   <script src="store.js"></script>
-  <script src="bibliothek.js?v=3"></script>
-  <script src="app.js?v=4"></script>
-  <script src="scripts.js?v=4"></script>
-  <script src="kanban.js?v=6"></script>
-  <script src="history.js?v=2"></script>
-  <script src="calendar.js?v=3"></script>
+  <script src="app.js?v=6"></script>
+  <script src="bibliothek.js?v=15"></script>
+  <script src="scripts.js?v=5"></script>
+  <script src="kanban.js?v=7"></script>
+  <script src="history.js?v=3"></script>
+  <script src="calendar.js?v=4"></script>
   <script src="effects.js"></script>
   <div class="kanban-toast" id="kanbanToast"></div>
 
