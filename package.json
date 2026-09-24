@@ -6,12 +6,15 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js",
-    "test": "playwright test"
+    "test": "playwright test",
+    "oauth:setup": "node scripts/setup-oauth.js",
+    "oauth:check": "node scripts/check-oauth-health.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "express": "^4.18.2",
+    "googleapis": "^180.0.0",
     "sql.js": "^1.10.2",
     "uuid": "^9.0.0"
   },

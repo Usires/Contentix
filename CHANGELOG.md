@@ -8,6 +8,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **🤖 Vidi 2.0 — local AI content-buddy (optional add-on)**: Contentix
+  now ships an optional, opt-in service that does proactive topic
+  discovery plus script-drafting via local Ollama models. Contentix
+  stays fully functional without Vidi — the service is detected via
+  health-check and UI renders conditionally. Ships in `vidi2/` with:
+  - **Backend (Phase 1.1):** 6 Contentix routes (`/api/vidi/status`,
+    `/api/vidi/inbox`, `/api/vidi/inbox/:id/approve`,
+    `/api/vidi/inbox/:id/reject`, `/api/vidi/runs`, `/api/vidi/settings`)
+    plus `vidi_suggestions` and `vidi_runs` DB tables. Approval
+    auto-creates a `videos` row in the research lane.
+  - **Service (Phase 2):** FastAPI on port 8191 with `/status`,
+    `/run/discovery`, `/runs`, `/settings`. Includes Ollama model
+    detection (qwen3.5, gemma4:12b, ornith), cloud-fallback toggle
+    for M3, cron expression for periodic discovery.
+  - **UI (Phase 1.2 v1–v8):** floating layer with backdrop, draggable
+    panel with `localStorage`-persisted position, theme-consistent
+    colors via tokens (auto-adapts to spring/summer/autumn/winter),
+    Approve/Reject actions wired to the backend.
+  - **Docker:** separate `docker-compose.vidi.yml` for opt-in deploy.
+  - **Phase 3+ (discovery pipeline, cron setup, mode 3 script
+    drafting):** spec'd in `vidi2/SPEC.md`, not yet implemented.
+- **🔐 YouTube OAuth self-service setup (v0.13.1+):** Contentix now ships
+  with everything needed for a fresh install to grant YouTube access
+  on its own — no manual token-file editing. Adds:
+  - `npm run oauth:setup` — interactive wizard that asks for Client ID
+    + Secret, generates the Google auth URL, accepts the redirect
+    URL (works over SSH tunnels), and saves the token automatically.
+  - `npm run oauth:check` — CLI status check (human / JSON / exit code)
+    suitable for cron or monitoring scripts.
+  - `GET /health/oauth` on the MCP server — live health check via the
+    cheapest authenticated YouTube API call. Returns 200 with
+    `status: "healthy"` or 503 with `status: "expired"`. Drop the URL
+    into Uptime-Kuma or any HTTP monitor.
+  - `docs/oauth-setup.md` — complete guide for new users (GCP project,
+    API enablement, OAuth consent screen, client credentials, the
+    three supported browser-flow scenarios).
+  - README updated with OAuth section, new env vars, and a
+    Troubleshooting entry that points to `oauth:check`.
+
+### Changed
+- **🔒 YouTube-import locks (Phase 2+1):** videos imported from
+  YouTube are now marked `is_locked=1` so the schema-validated
+  `rejectLockedEdits()` middleware returns HTTP 423 on manual
+  PATCH/PUT. UI badge (🔒) signals locked items. This protects
+  scraped data from being clobbered by stale UI forms.
+
+### Removed
+- **🗑️ `board__column-toggle` legacy CSS** (Phase 1.2 refactor):
+  magic-hex styles from the abandoned "Vidi-Lane-as-column"
+  prototype. Replaced by the floating-layer pattern with tokenised
+  colors.
+
+### Fixed
+- **🐛 Drag-jump on Vidi panel** (Phase 1.2 v4–v5): moved from
+  `position: calc(...) + var(...)` CSS custom-properties to
+  direct `style.top` / `style.left` inline writes with
+  `will-change: top, left` — eliminates the ~8px compositor jump
+  that the earlier v1–v3 implementation showed on first drag.
+- **🐛 Readability on Vidi cards** (Phase 1.2 v6–v7): card title
+  and hook were dark on dark sidebar background. Now use
+  `var(--text-on-dark)` / `var(--text-on-dark-secondary)` so the
+  text is legible across all five themes.
+
+---
+
+## [Unreleased]
+
+### Added
 - **📋 4-Bot audit reports** (`docs/archbot-review-2026-08-26.md`,
   `docs/qabot-test-coverage-2026-08-26.md`,
   `docs/refactorbot-lib-plan-2026-08-26.md`,

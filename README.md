@@ -76,6 +76,28 @@ npm install
 `start.sh` is a thin wrapper around `restart.sh` — both are idempotent
 and use a PID file under `./contentix.pid`.
 
+## YouTube OAuth (for your own channel & analytics)
+
+By default Contentix uses the YouTube Data API v3 with the public `vidIQ` key
+for channel research. To get **your own channel's** videos, watchtime, and
+YouTube Analytics data, you need a one-time OAuth setup.
+
+```bash
+npm install
+npm run oauth:setup          # interactive wizard: prints Google auth URL
+npm run oauth:check          # verify the token works
+```
+
+Full instructions — including how to do the OAuth dance over an SSH tunnel
+if Contentix runs on a remote server — are in [`docs/oauth-setup.md`](./docs/oauth-setup.md).
+The setup only needs to be re-run when your refresh token expires or gets
+revoked (typically every few months, or never).
+
+For monitoring, the MCP server exposes `GET /health/oauth` (returns `200 OK`
+with `status: "healthy"` when the token works, `503 Service Unavailable`
+with `status: "expired"` otherwise). Drop this URL into Uptime-Kuma or any
+HTTP monitor to get notified before you notice "new videos aren't showing up".
+
 ## Tests (Playwright)
 
 A small Playwright suite covers the most visible UI regressions (the
@@ -107,6 +129,9 @@ and only needed if you want the 🔭 research feature.
 | `DATA_DIR` | no | (next to `index.js`) | Where `contentix.db` lives. Docker sets this to `/app/data`. |
 | `LOG_LEVEL` | no | `info` | `info` \| `debug` \| `silent` |
 | `OPENCLAW_GATEWAY_URL` | no | — | e.g. `http://localhost:18789` |
+| `GOOGLE_CLIENT_ID` | no (only for OAuth) | — | See [docs/oauth-setup.md](./docs/oauth-setup.md) |
+| `GOOGLE_CLIENT_SECRET` | no (only for OAuth) | — | Same as above |
+| `MCP_PORT` | no | `8190` | Port of the YouTube MCP server (used by `oauth:setup` and `/health/oauth`) |
 | `OPENCLAW_GATEWAY_TOKEN` | no | — | From `~/.openclaw/openclaw.json` |
 
 ---
@@ -291,6 +316,14 @@ See `docs/vidi-agent.md` for the full operational checklist.
 
 Make sure `<div id="kanbanBoard">` has `class="board"`. The class is
 required for the CSS grid.
+
+### New videos aren't auto-importing
+
+Your YouTube OAuth refresh token has likely expired or been revoked.
+Run `npm run oauth:check` to see the current state, then
+`npm run oauth:setup` to re-authenticate. The `/health/oauth` endpoint
+on the MCP server (default `http://localhost:8190/health/oauth`) is
+suitable for an Uptime-Kuma HTTP monitor.
 
 ---
 

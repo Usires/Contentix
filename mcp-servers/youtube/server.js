@@ -130,6 +130,76 @@ app.get('/auth/status', async (_req, res) => {
   });
 });
 
+// Live OAuth health: actually calls YouTube's cheapest authenticated endpoint
+// (channels.list?part=id&mine=true). Suitable for Uptime-Kuma HTTP monitors —
+// 200 = healthy, 503 = needs re-auth. Always JSON, never throws.
+app.get('/health/oauth', async (_req, res) => {
+  const result = {
+    status: 'unknown',
+    message: '',
+    details: {},
+    checkedAt: new Date().toISOString(),
+  };
+  try {
+    const saved = await loadSavedToken();
+    if (!saved) {
+      result.status = 'missing';
+      result.message = 'No oauth-token.json. Run: node scripts/setup-oauth.js';
+      return res.status(503).json(result);
+    }
+    const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET } = process.env;
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+      result.status = 'no_credentials';
+      result.message = 'GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET missing in .env';
+      return res.status(503).json(result);
+    }
+    const auth = makeOAuth2Client();
+    auth.setCredentials(saved);
+    const youtube = google.youtube({ version: 'v3', auth });
+    const res2 = await youtube.channels.list({ part: 'id', mine: true, maxResults: 1 });
+    const channelId = res2.data.items?.[0]?.id || null;
+    const now = Date.now();
+    const expiresAt = saved.expiry_date || 0;
+    const expiresInDays = expiresAt ? Math.round((expiresAt - now) / 86_400_000) : null;
+    // Save any auto-refreshed token back to disk so the next MCP call doesn't repeat the refresh.
+    if (auth.credentials && auth.credentials.access_token !== saved.access_token) {
+      try {
+        await saveToken(auth.credentials);
+      } catch (_) { /* non-fatal */ }
+    }
+    result.details.channelId = channelId;
+    result.details.scope = saved.scope;
+    result.details.tokenExpiresInDays = expiresInDays;
+    result.details.accessTokenJustRefreshed = !!auth.credentials?.access_token && auth.credentials.access_token !== saved.access_token;
+    // If the live call succeeded, the OAuth flow is healthy — regardless of whether the
+    // stored expiry date looks stale. The refresh_token auto-renews the access_token.
+    if (expiresInDays !== null && expiresInDays <= 7 && result.details.accessTokenJustRefreshed) {
+      // Refresh worked, but warn the user that the refresh-token itself is approaching expiry.
+      result.status = 'expiring_soon';
+      result.message = `OAuth works (access token auto-refreshed). Refresh token valid for ~${expiresInDays} day(s). Run setup-oauth.js soon to be safe.`;
+      return res.status(200).json(result);
+    }
+    if (expiresInDays !== null && expiresInDays <= 7) {
+      result.status = 'expiring_soon';
+      result.message = `Token works, but expires in ${expiresInDays} day(s). Consider re-auth soon.`;
+      return res.status(200).json(result);
+    }
+    result.status = 'healthy';
+    result.message = `OAuth healthy. Channel ${channelId || 'unknown'}. Token valid for ${expiresInDays} more day(s).`;
+    return res.status(200).json(result);
+  } catch (err) {
+    const code = err.code || err.response?.status;
+    if (code === 401 || /invalid_grant|revoked|expired/i.test(err.message || '')) {
+      result.status = 'expired';
+      result.message = `OAuth token rejected: ${err.message}`;
+      return res.status(503).json(result);
+    }
+    result.status = 'error';
+    result.message = `Health check failed: ${err.message}`;
+    return res.status(503).json(result);
+  }
+});
+
 // MCP transport via SSE
 const transports = new Map();
 app.get('/sse', async (req, res) => {
