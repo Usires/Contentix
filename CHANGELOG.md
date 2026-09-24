@@ -27,17 +27,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     colors via tokens (auto-adapts to spring/summer/autumn/winter),
     Approve/Reject actions wired to the backend.
   - **Docker:** separate `docker-compose.vidi.yml` for opt-in deploy.
-  - **⚠️ Status (this entry is honest, post-merge):** Phase 1.1
-    (Contentix-Routes) and Phase 2 (FastAPI service skeleton) are
-    live and respond to health checks, but **Phase 3 (the actual
-    discovery pipeline) is still stubbed**. Suggestions currently
-    appearing in the Vidi inbox are placeholder data from
-    `service.py` line ~308. Real Pull→Classify→Trend→Synthesize→Push
-    lives in `vidi2/src/discovery.py` but is not wired into the
-    service yet — tracked on the NixBoard backlog as card **VIDI**
-    (estimated ~1–2h of focused work).
-  - **Phase 3+ (discovery pipeline, cron setup, mode 3 script
-    drafting):** spec'd in `vidi2/SPEC.md`, not yet implemented.
+  - **✅ Phase 3 wired up (this entry supersedes the earlier "still
+    stubbed" status):** The real discovery pipeline is now active.
+    `service.py` `/run/discovery` calls `discovery.py:run_discovery()`
+    (Pull→Classify→Trend→Synthesize→Push). Three bugs in the original
+    wiring got fixed:
+    - `yt_search.py` was calling `/mcp/call` — the MCP server actually
+      exposes tools at `POST /tool/<tool-name>`.
+    - YT-MCP returns CamelCase keys (`videoId`, `publishedAt`), but
+      `yt_search.load_trending_signals` was reading snake_case —
+      so dedup-filtered everything to zero. Fixed by normalising to
+      snake_case inside `call_mcp_search`.
+    - `chat_json` was burning the entire `num_predict` budget on
+      internal `thinking` tokens (qwen3.5, ornith-1.5 are thinking-
+      capable models), returning empty content. Fixed by passing
+      `think: false` so the JSON output actually gets produced.
+    - `_discovery_stub` (the Phase-2 placeholder) is now a deprecated
+      no-op so old callers don't crash if anything still references it.
+    First live run produced a real card:
+    *"Warcraft III unter Linux: Der ultimative Guide für Mods & Performance"*
+    with confidence 0.85.
+  - **⚠️ Known limitations:** (1) `lilac_archive.load_recent_items`
+    returns nothing because the LILAC newsletter hasn't run since
+    April 2026 — the YT-search half of the pipeline works fine. (2)
+    YouTube Data API v3 has a per-day Search-Query quota — heavy
+    testing in one session will burn it. (3) Classifier is still
+    conservative: most items come back with channel_fit < 0.5 and
+    get filtered. Reasonable, but a few more tuning iterations would
+    raise throughput.
+  - **Default model switched to ornith-1.5:9b** — Vidi's
+    `OLLAMA_AGENT_MODEL` default is now `ornith-1.5:9b` (was
+    `ornith:latest`). 1.5 gives sharper insights on the script-
+    drafting tasks per A/B test. Override per-deploy via env var.
+  - **Phase 4+ (cron setup, mode 3 script drafting):** spec'd in
+    `vidi2/SPEC.md`, not yet implemented.
 - **🔐 YouTube OAuth self-service setup (v0.13.1+):** Contentix now ships
   with everything needed for a fresh install to grant YouTube access
   on its own — no manual token-file editing. Adds:
