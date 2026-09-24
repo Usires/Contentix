@@ -30,17 +30,26 @@ Contentix is a single-binary web app for planning YouTube videos end to end:
   Kanban card spawns a Vidi research run via OpenClaw, streams
   progress into the UI, and writes the final report into the card.
   Vidi is a separate agent in the same OpenClaw gateway — a scout
-  that gathers vidIQ data, not a coach. See `docs/vidi-agent.md` for
-  the architecture.
+  that gathers YouTube channel/video data, not a coach. See
+  `docs/vidi-agent.md` for the architecture.
 - 🎨 **Seasonal themes** (Nix Violet default + four others) with
   per-theme colour tokens.
 
 **Stack:** Node.js + Express + sql.js (SQLite in-process) — frontend
 and backend in a single app. Port `3038`.
 
-**vidIQ:** MCP-based integration for channel and video stats. Each
-fresh call costs vidIQ credits, so the app caches aggressively in
-`vidiq_cache` and `vidiq_video_cache`.
+**YouTube Data API v3** (via self-hosted MCP server in `mcp-servers/youtube/`):
+the primary source for channel and video stats. Free public quota
+(10,000 units/day) — no third-party credits required. Cached
+aggressively in `app_settings.yt_cache_*` so we don't burn quota
+on repeat lookups.
+
+> **Legacy:** older versions integrated with [vidIQ](https://app.vidiq.com/)
+> as the primary data source. The legacy `/api/vidiq/*` routes and
+> `vidiq_*` DB tables still exist for backwards-compat but require
+> `VIDIQ_API_KEY` in `.env`. New code should use the `/api/youtube/*`
+> routes. Full deprecation tracked on NixBoard card **VIDIQ** (planned
+> removal: 2026-10-31).
 
 ---
 
@@ -50,7 +59,7 @@ fresh call costs vidIQ credits, so the app caches aggressively in
 git clone https://github.com/Usires/contentix.git
 cd contentix
 cp .env.example .env
-# edit .env and add your VIDIQ_API_KEY
+# edit .env and add GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET (for OAuth)
 docker-compose up -d
 open http://localhost:3038
 ```
@@ -68,7 +77,7 @@ If you prefer running it directly (no Docker):
 git clone https://github.com/Usires/contentix.git
 cd contentix
 cp .env.example .env
-# edit .env and add your VIDIQ_API_KEY
+# edit .env and add GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET (for OAuth)
 npm install
 ./start.sh       # → http://localhost:3038
 ```
@@ -78,9 +87,10 @@ and use a PID file under `./contentix.pid`.
 
 ## YouTube OAuth (for your own channel & analytics)
 
-By default Contentix uses the YouTube Data API v3 with the public `vidIQ` key
-for channel research. To get **your own channel's** videos, watchtime, and
-YouTube Analytics data, you need a one-time OAuth setup.
+Contentix uses the **YouTube Data API v3** with your own OAuth
+credentials for everything: channel research, your own uploads,
+watchtime, and YouTube Analytics data. There is no third-party
+service in the loop — you connect directly to Google's API.
 
 ```bash
 npm install
@@ -118,21 +128,22 @@ in `playwright.config.js`. HTML report goes to `playwright-report/`
 
 ## Environment variables
 
-See [`.env.example`](./.env.example) for the full list. The only
-required one is `VIDIQ_API_KEY`. The OpenClaw variables are optional
-and only needed if you want the 🔭 research feature.
+See [`.env.example`](./.env.example) for the full list. You need
+`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` if you want OAuth
+(your own channel's videos, watchtime, Analytics data). Everything
+else is optional and has a sensible default.
 
 | Variable | Required | Default | Notes |
 |----------|----------|---------|-------|
-| `VIDIQ_API_KEY` | yes | — | Get from [app.vidiq.com](https://app.vidiq.com) → Settings → API |
+| `GOOGLE_CLIENT_ID` | yes, for OAuth | — | See [docs/oauth-setup.md](./docs/oauth-setup.md) |
+| `GOOGLE_CLIENT_SECRET` | yes, for OAuth | — | Same as above |
 | `PORT` | no | `3038` | HTTP port |
 | `DATA_DIR` | no | (next to `index.js`) | Where `contentix.db` lives. Docker sets this to `/app/data`. |
 | `LOG_LEVEL` | no | `info` | `info` \| `debug` \| `silent` |
 | `OPENCLAW_GATEWAY_URL` | no | — | e.g. `http://localhost:18789` |
-| `GOOGLE_CLIENT_ID` | no (only for OAuth) | — | See [docs/oauth-setup.md](./docs/oauth-setup.md) |
-| `GOOGLE_CLIENT_SECRET` | no (only for OAuth) | — | Same as above |
 | `MCP_PORT` | no | `8190` | Port of the YouTube MCP server (used by `oauth:setup` and `/health/oauth`) |
 | `OPENCLAW_GATEWAY_TOKEN` | no | — | From `~/.openclaw/openclaw.json` |
+| `VIDIQ_API_KEY` | no (legacy) | — | **Deprecated.** Only needed if you still use the legacy `/api/vidiq/*` routes (will be removed 2026-10-31, see NixBoard **VIDIQ**). New code uses `/api/youtube/*`. |
 
 ---
 
@@ -140,7 +151,7 @@ and only needed if you want the 🔭 research feature.
 
 ```
 contentix/
-├── index.js              ← Backend: Express, REST API, vidIQ MCP client,
+├── index.js              ← Backend: Express, REST API, YouTube MCP client,
 │                            OpenClaw research bridge, sqlite-via-js
 ├── Dockerfile            ← node:20-alpine, runs as non-root
 ├── docker-compose.yml    ← Service definition, healthcheck, volumes
@@ -220,12 +231,13 @@ See [AGENTS.md](./AGENTS.md) for the full reference. Highlights:
 | `POST` | `/api/scripts/import` | Import a `.md` file as a script |
 | `GET` | `/api/scripts/folders` | List script folders |
 | `GET` | `/api/history` | List archived videos |
-| `POST` | `/api/vidiq/refresh` | Trigger a vidIQ refresh (async, costs credits) |
-| `GET` | `/api/vidiq/stats` | Cached channel stats |
-| `GET` | `/api/vidiq/watchtime` | Cached watchtime (28-day window, 6h cache) |
+| `POST` | `/api/youtube/refresh` | Trigger a YouTube Data API refresh (async) |
+| `GET` | `/api/youtube/channel-stats` | Cached channel stats |
+| `GET` | `/api/youtube/watchtime` | Cached watchtime (28-day window, 6h cache) |
 | `POST` | `/api/research/:videoId` | Trigger a Nix research run (v0.10+) |
 | `GET` | `/api/research/:jobId` | Poll a research job |
 | `DELETE` | `/api/research/:jobId` | Cancel a research job |
+| ~~`/api/vidiq/*`~~ | **legacy** | Deprecated `/api/vidiq/*` routes — returns 503 unless `VIDIQ_API_KEY` is set. Removal planned 2026-10-31 (NixBoard **VIDIQ**). |
 
 ---
 
@@ -244,27 +256,52 @@ on every boot.
   pipeline semantics.
 - `scripts` — markdown script bodies, optionally linked to a video via
   `video_id`.
-- `vidiq_cache`, `vidiq_video_cache` — vidIQ responses, keyed by
-  channel/video id. Saves credits.
-- `vidiq_refresh_jobs` — async vidIQ-refresh bookkeeping.
+- `app_settings.yt_cache_*` — YouTube Data API response cache,
+  keyed by `key` + `video_id`/`channel_id`. Saves YouTube API
+  quota (10,000 units/day).
+- `yt_cache`, `yt_video_cache` — older YouTube cache tables (also
+  backed by `app_settings` since v0.13.1).
+- `vidiq_cache`, `vidiq_video_cache` — **legacy** vidIQ response
+  cache. Keyed by channel/video id. Will be removed 2026-10-31
+  (NixBoard **VIDIQ**).
+- `vidiq_refresh_jobs` — **legacy** async vidIQ-refresh bookkeeping.
+  Will be removed 2026-10-31 (NixBoard **VIDIQ**).
+- `research_jobs` — async Nix/Vidi research bookkeeping (v0.10+).
 - `research_jobs` — async Nix/Vidi research bookkeeping (v0.10+).
 
 ---
 
-## vidIQ integration
+## YouTube Data API integration
 
-The backend calls vidIQ's MCP (Model Context Protocol) via HTTP(SSE).
-The MCP client lives in `index.js` (search for `makeVidiqCmd` and
-`parseVidiqResponse`). Responses are cached aggressively — a fresh
-video-stats call only happens when the cache is missing or stale.
+The backend talks to YouTube through a self-hosted MCP server
+(`mcp-servers/youtube/`, exposed on `MCP_PORT` = 8190). The MCP
+client lives in `index.js` (search for `youtube_api` and
+`makeMcpCall`). Responses are cached aggressively in `app_settings`
+so we don't burn the YouTube Data API quota (10,000 units/day).
 
-**Credit-saving rules:**
+**Quota-saving rules:**
 
-- Channel stats: cached for 6 hours by default.
-- Video stats: cached forever per `video_id`, only re-fetched if
-  `title` or `thumbnail_url` are missing in the local row.
-- The `POST /api/vidiq/refresh` endpoint is the only way to force a
-  full refresh.
+- Channel stats: cached for 6 hours by default (`yt.cache.channelTtlHours`).
+- Video stats: cached for 24 hours by default (`yt.cache.videoTtlHours`).
+- The `POST /api/youtube/refresh` endpoint forces a full refresh of
+  cached data (counts against quota).
+
+OAuth tokens for **your own channel's** data (uploads, watchtime,
+YouTube Analytics) live in `app_settings` (encrypted at rest since
+v0.13.1). Refresh them with `npm run oauth:setup`.
+
+---
+
+## Legacy vidIQ integration (deprecated)
+
+> **Status:** deprecated as of v0.13.0. Removal planned 2026-10-31.
+> New code uses the YouTube Data API (above). See NixBoard **VIDIQ**
+> for the migration plan.
+
+When `VIDIQ_API_KEY` is set, the legacy `/api/vidiq/*` routes
+forward to the self-hosted YouTube MCP under the hood. They keep
+the old response shape for backwards-compat with older clients.
+Without `VIDIQ_API_KEY`, those routes return 503.
 
 ---
 
@@ -282,8 +319,9 @@ The result opens in a modal with full markdown rendering (via
 self-aware: it checks whether a script already exists for the video
 and skips a duplicate push.
 
-**Vidi is a scout, not a coach.** It gathers vidIQ data and quotes
-sources. Strategic recommendations come from Nix (the main agent).
+**Vidi is a scout, not a coach.** It gathers YouTube channel and
+video data via the self-hosted YouTube MCP and quotes sources.
+Strategic recommendations come from Nix (the main agent).
 See `docs/vidi-agent.md` for the full architecture, role split,
 cost model, and operational checklist.
 
@@ -387,10 +425,17 @@ Another process is holding port `3038`. Run `./restart.sh` (it kills
 the port-holder automatically) or `lsof -i :3038` / `ss -tlnp
 sport = :3038` to find it manually.
 
-### vidIQ stats show 0
+### YouTube channel stats show 0
 
-Either your `VIDIQ_API_KEY` is wrong/expired, or you haven't triggered
-a refresh yet. Hit the "vidIQ refresh" button in the sidebar.
+You haven't triggered a refresh yet, or the YouTube Data API quota
+(10,000 units/day) is exhausted. Hit the "YouTube refresh" button in
+the sidebar to force a re-fetch. If you're using a fresh OAuth
+token, run `npm run oauth:check` first to verify the token works.
+
+> **Legacy vidIQ users:** if your `.env` still has `VIDIQ_API_KEY`,
+> the old `/api/vidiq/stats` endpoint returns 503 when the key is
+> missing or expired. Switch to `/api/youtube/channel-stats` (the
+> response shape is identical).
 
 ### `🔭 Vidi-Research` button does nothing
 
