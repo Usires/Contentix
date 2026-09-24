@@ -66,6 +66,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     current LILAC topics are medical (`GOÄ-Reform`, `NIH grants`,
     `GKV-Fachgruppenzuordnung`) which the channel-fit classifier
     correctly filters out — the fix is technical, not topical.
+  - **✅ LILAC archive path corrected (post-fix follow-up):**
+    The first LILAC-parser fix above was tested against
+    `/home/dirk/reverse-proxy/html/apricot/` — but that's the
+    Medical/Project-Apricot newsletter. The Linux/Project-LILAC
+    newsletter lives one directory over, at
+    `/home/dirk/reverse-proxy/html/newsletter/`. Default path
+    changed to `newsletter/` so the discovery pipeline now sees
+    actual Linux topics, not Medical ones. Live test against
+    the 2026-09-24 Linux newsletter returns 15 scored items in
+    roughly equal splits of EN/DE, including Steam Deck guides,
+    Counter-Strike Rush mode, O.B.O.L. coin-flip horror, the
+    NVIDIA 595 Linux driver announcement, KeePassXC 2.8,
+    SparkyLinux Tiamat — all real linux-gaming / oss relevance.
+    The medical topics (still found in `apricot/`) are no longer
+    pulled by Vidi's discovery pipeline.
   - **⚠️ Known limitations:** (1) `lilac_archive.load_recent_items`
     returns nothing because the LILAC newsletter hasn't run since
     April 2026 — the YT-search half of the pipeline works fine. (2)

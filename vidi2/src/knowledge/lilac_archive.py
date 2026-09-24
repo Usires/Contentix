@@ -21,7 +21,7 @@ from typing import List, Dict, Optional
 # We prefer the meta.json files because they contain the YouTube relevance score
 # (set by the MiniMax-based scorer in lilac.py).
 
-DEFAULT_ARCHIVE_DIR = Path("/home/dirk/reverse-proxy/html/apricot")
+DEFAULT_ARCHIVE_DIR = Path("/home/dirk/reverse-proxy/html/newsletter")
 LILAC_NEWSLETTER_URL = os.environ.get(
     "LILAC_NEWSLETTER_URL",
     "http://localhost:8182/newsletter/lilac-archive.json"
