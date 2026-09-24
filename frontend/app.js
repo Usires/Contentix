@@ -7,6 +7,50 @@ let allContent = [];
 let activeFilter = 'all';
 const API = '/api';
 
+// ─── Vidi 2.0 Status (Phase 1.2, 2026-09-17) ─────────────────────────────────
+// Cached globally so kanban.js can render the Inbox lane conditionally.
+// IMPORTANT: assigned to window.* so kanban.js (different file scope) can read it.
+window.vidiStatus = { installed: false };
+
+async function fetchVidiStatus() {
+  try {
+    const res = await fetch(`${API}/vidi/status`);
+    if (!res.ok) return;
+    window.vidiStatus = await res.json();
+    // Trigger a kanban re-render if the board is currently shown.
+    if (typeof window.refreshKanbanBoard === 'function') {
+      window.refreshKanbanBoard();
+    }
+    // Phase 1.2 defensive: re-render sidebar Vidi-status if such an element exists.
+    if (typeof window.refreshVidiSidebar === 'function') {
+      window.refreshVidiSidebar();
+    }
+  } catch (e) {
+    // Vidi not installed or unreachable — graceful, no error to user.
+    window.vidiStatus = { installed: false };
+  }
+}
+
+function vidiIsInstalled() {
+  return window.vidiStatus && window.vidiStatus.installed === true;
+}
+
+// Phase 1.2 defensive: Setup a document-level fallback click handler for vidi-toggle.
+// This fires EVEN IF the delegated listener on #kanbanBoard doesn't catch the click —
+// covers cases where the button is rendered outside the board (e.g. sidebar) or where
+// the parent's event delegation isn't reachable (e.g. due to position:absolute).
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-action="toggle-vidi-inbox"]');
+  if (!btn) return;
+  // Only fire if the kanban-delegated handler hasn't already handled this.
+  // We check by setting a tiny flag on the event; kanban.js handler will set it.
+  if (e._vidiToggleHandled) return;
+  e._vidiToggleHandled = true;
+  if (typeof window.toggleVidiInbox === 'function') {
+    window.toggleVidiInbox();
+  }
+});
+
 // ─── Init ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   loadContent();
@@ -34,6 +78,11 @@ document.addEventListener('DOMContentLoaded', () => {
     .then(r => r.json())
     .then(d => { const el = document.getElementById('sidebarVersion'); if (el && d.version) el.textContent = `v${d.version}`; })
     .catch(() => {});
+  // Vidi 2.0 detection (Phase 1.2): check if the optional Vidi service is installed.
+  // If yes, kanban will render an extra "Vidi-Inbox" lane with proactive suggestions.
+  fetchVidiStatus();
+  // Refresh every 60s so status-changes (service start/stop) propagate.
+  setInterval(fetchVidiStatus, 60000);
 });
 
 // ─── Load Videos from Backend ─────────────────────────────────────────────────
@@ -449,6 +498,11 @@ function restoreView() {
   if (view === 'scripts') { initScripts(); }
   if (view === 'history') { initHistory(); }
   if (view === 'bibliothek') { if (typeof loadBibliothek === 'function') loadBibliothek(); }
+  // Server-Logs: nur Auto-Refresh, wenn Settings-Tab aktiv ist
+  if (typeof window.ContentixLogs !== 'undefined') {
+    if (view === 'settings') window.ContentixLogs.start();
+    else window.ContentixLogs.stop();
+  }
 }
 
 function setupNav() {
@@ -468,6 +522,11 @@ function setupNav() {
       }
       if (view === 'calendar') renderCalendar();
       if (view === 'bibliothek') { if (typeof loadBibliothek === 'function') loadBibliothek(); }
+      // Server-Logs: Auto-Refresh nur bei Settings-Tab
+      if (typeof window.ContentixLogs !== 'undefined') {
+        if (view === 'settings') window.ContentixLogs.start();
+        else window.ContentixLogs.stop();
+      }
       if (view === 'ideas') { /* kanban renders on DOMContentLoaded */ }
       if (view === 'scripts') { initScripts(); }
       if (view === 'history') { initHistory(); }

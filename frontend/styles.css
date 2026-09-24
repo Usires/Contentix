@@ -3292,3 +3292,134 @@ kbd {
   display: inline-block;
   min-width: 60px;
 }
+
+/* ─── Server-Logs (settings) ────────────────────────────────────────────────────── */
+
+.logs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 0 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.logs-filter-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.log-chip {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(220, 235, 255, 0.85);
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.log-chip:hover {
+  background: rgba(255, 255, 255, 0.10);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.log-chip--active {
+  background: var(--nix-violet, #c678dd);
+  border-color: var(--nix-violet, #c678dd);
+  color: #fff;
+  font-weight: 700;
+}
+
+.logs-search {
+  flex: 1;
+  min-width: 160px;
+  padding: 5px 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: rgba(220, 235, 255, 0.95);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.logs-search:focus {
+  outline: none;
+  border-color: var(--nix-violet, #c678dd);
+}
+
+.logs-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: rgba(220, 235, 255, 0.55);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.logs-output {
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  padding: 12px 14px;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: rgba(220, 235, 255, 0.88);
+  max-height: 480px;
+  overflow-y: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  tab-size: 2;
+}
+
+.logs-output::-webkit-scrollbar {
+  width: 8px;
+}
+.logs-output::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.3);
+}
+.logs-output::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+.logs-line {
+  display: block;
+  padding: 1px 0;
+}
+
+.logs-line:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.logs-level {
+  font-weight: 700;
+}
+
+.logs-level--info  { color: #5af78e; }
+.logs-level--warn  { color: #ffcb6b; }
+.logs-level--error { color: #ff5e5e; }
+.logs-level--debug { color: rgba(220, 235, 255, 0.45); }
+
+.logs-mark {
+  background: var(--nix-violet, #c678dd);
+  color: #fff;
+  padding: 0 2px;
+  border-radius: 2px;
+  font-weight: 700;
+}
+
+.logs-empty,
+.logs-error {
+  color: rgba(220, 235, 255, 0.5);
+  font-style: italic;
+}
+
+.logs-error {
+  color: #ff5e5e;
+}

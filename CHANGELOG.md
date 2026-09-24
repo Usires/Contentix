@@ -46,6 +46,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     three supported browser-flow scenarios).
   - README updated with OAuth section, new env vars, and a
     Troubleshooting entry that points to `oauth:check`.
+- **📋 Server-Logs in Settings (Phase 1 of 2):** Adds a live log-viewer
+  card to the Settings tab as a second column to the YouTube cache
+  settings — a single place for error-research when something is off.
+  - `data/contentix.log` is now persisted alongside the database
+    (rotated at 5 MB, 3 generations kept, oldest dropped). Level is
+    encoded in the line so frontend can colorise.
+  - `GET /api/logs?lines=200&level=INFO|WARN|ERROR&search=foo` returns
+    the tail (across current + rotated generations), with optional
+    level filter (>=) and case-insensitive substring search.
+  - `frontend/logs.js` (new) renders the tail in a `<pre>` with a
+    monospace, scrollable panel, 10-second auto-refresh, and
+    filter chips (Alle / INFO / WARN / ERROR). Auto-refresh only runs
+    while the Settings tab is active — saves a fetch per second when
+    you're on Kanban / Calendar.
+  - The follow-up (SSE-based live streaming instead of polling) is
+    tracked as NixBoard card **LOGS** (Backlog).
 
 ### Changed
 - **🔒 YouTube-import locks (Phase 2+1):** videos imported from

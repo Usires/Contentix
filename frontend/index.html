@@ -334,6 +334,26 @@
               </button>
               <span id="yt-cache-saved-status" class="settings-saved-status"></span>
             </div>
+
+          <div class="content-card" id="settingsLogsCard">
+            <h3>📋 Server-Logs</h3>
+            <p>
+              Letzte Log-Zeilen aus <code>data/contentix.log</code> (rotiert bei 5 MB, 3 Generationen).
+              Auto-Refresh alle 10s. Für ausführliche Fehler-Recherche bei OAuth-, Import- oder Sync-Problemen.
+            </p>
+            <div class="logs-toolbar">
+              <div class="logs-filter-chips" id="logsLevelChips">
+                <button class="log-chip log-chip--active" data-level="">Alle</button>
+                <button class="log-chip" data-level="INFO">ℹ️ INFO</button>
+                <button class="log-chip" data-level="WARN">⚠️ WARN</button>
+                <button class="log-chip" data-level="ERROR">❌ ERROR</button>
+              </div>
+              <input type="search" id="logsSearch" placeholder="🔍 Suchen…" class="logs-search">
+              <button class="btn btn--secondary" id="logsRefreshBtn">🔄 Aktualisieren</button>
+              <span class="logs-meta" id="logsMeta">— Zeilen, 0 B</span>
+            </div>
+            <pre id="logsOutput" class="logs-output" aria-live="polite">Lade…</pre>
+          </div>
         </div>
       </div>
 
@@ -448,6 +468,7 @@
   <script src="history.js?v=3"></script>
   <script src="calendar.js?v=4"></script>
   <script src="effects.js"></script>
+  <script src="logs.js?v=1"></script>
   <div class="kanban-toast" id="kanbanToast"></div>
 
   <!-- Command Palette (toggled by Cmd/Ctrl+K) -->

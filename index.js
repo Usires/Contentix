@@ -14,11 +14,42 @@ const app = express();
 //   debug — every API hit, every spawned sub-process
 //   silent — nothing except FATAL
 const LOG_LEVEL = (process.env.LOG_LEVEL || 'info').toLowerCase();
+const LOG_FILE = path.join(__dirname, 'data', 'contentix.log');
+const LOG_MAX_BYTES = 5 * 1024 * 1024;     // rotate at 5 MB
+const LOG_KEEP_GENERATIONS = 3;            // keep contentix.log.1 .. .3
+
+function logTimestamp() { return new Date().toISOString(); }
+function rotateLogIfNeeded() {
+  try {
+    if (!fs.existsSync(LOG_FILE)) return;
+    const stat = fs.statSync(LOG_FILE);
+    if (stat.size < LOG_MAX_BYTES) return;
+    // Rotate: .2 → .3, .1 → .2, current → .1, drop old .3
+    for (let i = LOG_KEEP_GENERATIONS; i >= 1; i--) {
+      const src = i === 1 ? LOG_FILE : `${LOG_FILE}.${i - 1}`;
+      const dst = `${LOG_FILE}.${i}`;
+      if (!fs.existsSync(src)) continue;
+      if (fs.existsSync(dst)) fs.unlinkSync(dst);
+      fs.renameSync(src, dst);
+    }
+  } catch (e) {
+    console.error('[contentix] log rotation failed:', e.message);
+  }
+}
+function writeLogFile(level, args) {
+  if (LOG_LEVEL === 'silent') return;
+  const line = `[${logTimestamp()}] [${level}] ${args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ')}\n`;
+  try {
+    fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+    rotateLogIfNeeded();
+    fs.appendFileSync(LOG_FILE, line);
+  } catch (e) { /* read-only filesystem — console logging still works */ }
+}
 const log = {
-  info:  (...a) => { if (LOG_LEVEL !== 'silent') console.log (...a); },
-  warn:  (...a) => { if (LOG_LEVEL !== 'silent') console.warn (...a); },
-  error: (...a) => { if (LOG_LEVEL !== 'silent') console.error(...a); },
-  debug: (...a) => { if (LOG_LEVEL === 'debug') console.log ('[debug]', ...a); },
+  info:  (...a) => { console.log (logTimestamp(), '[info]', ...a);  writeLogFile('INFO',  a); },
+  warn:  (...a) => { console.warn(logTimestamp(), '[warn]', ...a);  writeLogFile('WARN',  a); },
+  error: (...a) => { console.error(logTimestamp(), '[error]', ...a); writeLogFile('ERROR', a); },
+  debug: (...a) => { if (LOG_LEVEL === 'debug') { console.log(logTimestamp(), '[debug]', ...a); writeLogFile('DEBUG', a); } },
 };
 
 // vidIQ API key is optional in Phase 2 — we use YouTube Data API as primary source.
@@ -167,6 +198,46 @@ async function initDB() {
       updated_at TEXT DEFAULT (datetime('now'))
     );
   `);
+
+  // Migration: vidi_suggestions + vidi_runs (v0.14, 2026-09-17)
+  // Vidi 2.0 — proactive topic-discovery + script-drafting service.
+  // Suggestions are created by the Vidi service (cron-triggered), approved/rejected
+  // by the user via Contentix UI. vidi_runs is observability for the service.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS vidi_suggestions (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      hook_line TEXT,
+      why_now TEXT,
+      research_cites TEXT,
+      script_skeleton TEXT,
+      confidence_score REAL DEFAULT 0.0,
+      source TEXT,
+      target_channel_id TEXT,
+      status TEXT DEFAULT 'inbox',
+      created_at TEXT DEFAULT (datetime('now')),
+      decided_at TEXT,
+      decided_by TEXT,
+      video_id TEXT,
+      metadata TEXT
+    );
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_vidi_suggestions_status ON vidi_suggestions(status, created_at DESC)`);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS vidi_runs (
+      id TEXT PRIMARY KEY,
+      started_at TEXT DEFAULT (datetime('now')),
+      finished_at TEXT,
+      status TEXT DEFAULT 'running',
+      mode TEXT,
+      items_found INTEGER DEFAULT 0,
+      items_pushed INTEGER DEFAULT 0,
+      error TEXT,
+      duration_ms INTEGER,
+      metadata TEXT
+    );
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_vidi_runs_started ON vidi_runs(started_at DESC)`);
 
   // Migration: ensure vidiq_refresh_jobs exists for existing DBs.
 // v0.10 schema lacked a DEFAULT on started_at (jobs ended up with NULL started_at)
@@ -674,12 +745,37 @@ app.post('/api/videos', (req, res) => {
   }
 });
 
+// Locked video guard: synced-from-YouTube rows are immutable from user edits.
+// Status / title / youtube_url / video_id / published_date / thumbnail_url /
+// created_at / is_locked cannot be edited through PATCH or PUT once locked.
+// Other edit-rejection behavior (delete, etc.) is out of scope for now.
+const LOCKED_VIDEO_FIELDS = ['status', 'title', 'youtube_url', 'video_id', 'published_date', 'thumbnail_url', 'created_at', 'is_locked'];
+function rejectLockedEdits(existing, body, res) {
+  if (!existing.is_locked) return false;
+  const rejected = [];
+  for (const field of LOCKED_VIDEO_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(body, field) && body[field] !== existing[field]) {
+      rejected.push(field);
+    }
+  }
+  if (rejected.length > 0) {
+    res.status(423).json({
+      error: 'Video ist gelockt (von YouTube synchronisiert). Diese Felder können nicht manuell geändert werden: ' + rejected.join(', '),
+      lockedFields: rejected,
+      videoId: existing.video_id,
+    });
+    return true;
+  }
+  return false;
+}
+
 app.put('/api/videos/:id', (req, res) => {
   try {
     const { id } = req.params;
     const { status, youtube_url } = req.body;
     const existing = getAll('SELECT * FROM videos WHERE id = ?', id)[0];
     if (!existing) { res.status(404).json({ error: 'Video nicht gefunden' }); return; }
+    if (rejectLockedEdits(existing, req.body, res)) return;
     const updated = applyUpdate('videos', id, req.body, VIDEO_COLUMNS, JSON_ENCODE_COLUMNS);
     if (!updated) { res.status(404).json({ error: 'Video nicht gefunden' }); return; }
 
@@ -703,6 +799,7 @@ app.patch('/api/videos/:id', (req, res) => {
     const { id } = req.params;
     const existing = getAll('SELECT * FROM videos WHERE id = ?', id)[0];
     if (!existing) { res.status(404).json({ error: 'Video nicht gefunden' }); return; }
+    if (rejectLockedEdits(existing, req.body, res)) return;
     const updated = applyUpdate('videos', id, req.body, VIDEO_COLUMNS, JSON_ENCODE_COLUMNS);
     if (!updated) { res.status(404).json({ error: 'Video nicht gefunden' }); return; }
     const parsed = { ...updated, tags: updated.tags ? JSON.parse(updated.tags) : [] };
@@ -1121,6 +1218,297 @@ app.get('/api/youtube/cache-settings', (req, res) => {
   res.json(YT_CACHE_SETTINGS);
 });
 
+// ─── Vidi 2.0 Routes (Phase 1.1, 2026-09-17) ────────────────────────────────
+// These routes are Contentix-side. The Vidi 2.0 service runs as a separate
+// process (default port 8191) and pushes suggestions via /api/vidi/inbox
+// (POST from the service, or directly INSERT from a Contentix-CLI).
+//
+// Detection: GET /api/vidi/status tries to reach the service. If unreachable,
+// returns { installed: false } gracefully. Contentix UI hides Vidi-related
+// UI when installed === false. Contentix is fully functional without Vidi.
+
+// GET /api/vidi/status — Health-Check + Detection
+// Tries to reach Vidi service at VIDI_URL (env, default http://localhost:8191).
+// Returns: { installed, version, url, lastRun, nextRun, queueDepth, modelsAvailable }
+// Always 200 (graceful when Vidi not installed).
+app.get('/api/vidi/status', async (req, res) => {
+  const vidiUrl = process.env.VIDI_URL || 'http://localhost:8191';
+  let vidiRes = null;
+  let vidiStatus = null;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
+    vidiRes = await fetch(`${vidiUrl}/status`, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (vidiRes.ok) {
+      vidiStatus = await vidiRes.json();
+    }
+  } catch (e) {
+    // Vidi not installed or unreachable — graceful fallback
+  }
+
+  // Pull last run from DB (independent of service availability)
+  const lastRunRow = get('SELECT * FROM vidi_runs ORDER BY started_at DESC LIMIT 1');
+  const nextRunEstimate = lastRunRow && lastRunRow.finished_at
+    ? new Date(new Date(lastRunRow.finished_at).getTime() + 24 * 60 * 60 * 1000).toISOString()
+    : null;
+
+  if (!vidiStatus) {
+    res.json({
+      installed: false,
+      url: vidiUrl,
+      lastRun: lastRunRow ? lastRunRow.started_at : null,
+      nextRun: nextRunEstimate,
+      queueDepth: 0,
+      modelsAvailable: [],
+    });
+    return;
+  }
+
+  res.json({
+    installed: true,
+    version: vidiStatus.version || 'unknown',
+    url: vidiUrl,
+    lastRun: lastRunRow ? lastRunRow.started_at : vidiStatus.lastRun || null,
+    nextRun: vidiStatus.nextRun || nextRunEstimate,
+    queueDepth: vidiStatus.queueDepth || 0,
+    modelsAvailable: vidiStatus.modelsAvailable || [],
+  });
+});
+
+// GET /api/vidi/inbox?status=inbox&limit=20 — List suggestions
+// Status filter: inbox (default), approved, rejected, archived
+app.get('/api/vidi/inbox', (req, res) => {
+  try {
+    const { status = 'inbox', limit = 20 } = req.query;
+    const allowed = ['inbox', 'approved', 'rejected', 'archived'];
+    if (!allowed.includes(status)) {
+      res.status(400).json({ error: `status must be one of: ${allowed.join(', ')}` });
+      return;
+    }
+    const rows = getAll(
+      `SELECT * FROM vidi_suggestions WHERE status = ? ORDER BY created_at DESC LIMIT ?`,
+      status, parseInt(limit, 10) || 20
+    );
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/vidi/inbox/:id/approve — Approve a suggestion
+// Creates a videos row with status='research' and links it.
+// Body (optional): { userId?: string, channelId?: string }
+app.post('/api/vidi/inbox/:id/approve', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId = 'dirk', channelId = null } = req.body || {};
+    const suggestion = get('SELECT * FROM vidi_suggestions WHERE id = ?', id);
+    if (!suggestion) { res.status(404).json({ error: 'Suggestion nicht gefunden' }); return; }
+    if (suggestion.status !== 'inbox') {
+      res.status(409).json({ error: `Suggestion ist bereits ${suggestion.status}`, suggestion });
+      return;
+    }
+
+    // Cooldown: keine zwei approvals für dieselbe suggestion gleichzeitig
+    if (suggestion.video_id) {
+      const existingVideo = get('SELECT id FROM videos WHERE id = ?', suggestion.video_id);
+      if (existingVideo) {
+        // Update link if already created (idempotent)
+        run(
+          `UPDATE vidi_suggestions SET status = 'approved', decided_at = datetime('now'), decided_by = ? WHERE id = ?`,
+          userId, id
+        );
+        res.json({ status: 'approved', videoId: existingVideo.id, suggestion });
+        return;
+      }
+    }
+
+    // Create new videos row with status='research'
+    const videoId = require('crypto').randomUUID();
+    const now = new Date().toISOString();
+    const targetChannel = channelId || suggestion.target_channel_id || null;
+    run(
+      `INSERT INTO videos (
+        id, title, status, planned_date, published_date, video_id, youtube_url,
+        tags, notes, nix_comment, nix_comment_source, owner, script_id, position,
+        created_at, updated_at
+      ) VALUES (?, ?, 'research', ?, ?, ?, ?, '[]', '', ?, 'vidi', 'dirk', '', 0, ?, ?)`,
+      videoId,
+      suggestion.title,
+      null, null, null, null,
+      `Source: ${suggestion.source || 'vidi'} | Score: ${suggestion.confidence_score || 0}`,
+      now, now
+    );
+
+    run(
+      `UPDATE vidi_suggestions SET status = 'approved', decided_at = datetime('now'), decided_by = ?, video_id = ? WHERE id = ?`,
+      userId, videoId, id
+    );
+
+    res.json({ status: 'approved', videoId, suggestion });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/vidi/inbox/:id/reject — Reject a suggestion
+// Body (optional): { userId?: string, reason?: string }
+app.post('/api/vidi/inbox/:id/reject', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId = 'dirk', reason = '' } = req.body || {};
+    const suggestion = get('SELECT * FROM vidi_suggestions WHERE id = ?', id);
+    if (!suggestion) { res.status(404).json({ error: 'Suggestion nicht gefunden' }); return; }
+    if (suggestion.status !== 'inbox') {
+      res.status(409).json({ error: `Suggestion ist bereits ${suggestion.status}` });
+      return;
+    }
+
+    // Update metadata with rejection reason (don't lose info)
+    let metadata = {};
+    try { metadata = suggestion.metadata ? JSON.parse(suggestion.metadata) : {}; } catch (e) {}
+    metadata.rejectionReason = reason;
+    metadata.rejectedBy = userId;
+
+    run(
+      `UPDATE vidi_suggestions SET status = 'rejected', decided_at = datetime('now'), decided_by = ?, metadata = ? WHERE id = ?`,
+      userId, JSON.stringify(metadata), id
+    );
+    res.json({ status: 'rejected', suggestion });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/vidi/inbox — Insert a new suggestion (called by Vidi service or CLI)
+// Body: { title, hook_line?, why_now?, research_cites?, script_skeleton?, confidence_score?, source?, target_channel_id?, metadata? }
+app.post('/api/vidi/inbox', (req, res) => {
+  try {
+    const body = req.body || {};
+    if (!body.title) { res.status(400).json({ error: 'title required' }); return; }
+    const id = require('crypto').randomUUID();
+    run(
+      `INSERT INTO vidi_suggestions (
+        id, title, hook_line, why_now, research_cites, script_skeleton,
+        confidence_score, source, target_channel_id, status, metadata
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'inbox', ?)`,
+      id,
+      body.title,
+      body.hook_line || null,
+      body.why_now || null,
+      body.research_cites ? JSON.stringify(body.research_cites) : null,
+      body.script_skeleton || null,
+      body.confidence_score || 0.0,
+      body.source || null,
+      body.target_channel_id || null,
+      body.metadata ? JSON.stringify(body.metadata) : null
+    );
+    res.json({ id, status: 'inbox', created_at: new Date().toISOString() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/vidi/runs — Observability (last N discovery-runs)
+app.get('/api/vidi/runs', (req, res) => {
+  try {
+    const { limit = 10 } = req.query;
+    const rows = getAll(
+      `SELECT * FROM vidi_runs ORDER BY started_at DESC LIMIT ?`,
+      parseInt(limit, 10) || 10
+    );
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/vidi/runs — Insert a run record (called by Vidi service)
+// Body: { id?, mode?, items_found?, items_pushed?, error?, duration_ms?, metadata? }
+app.post('/api/vidi/runs', (req, res) => {
+  try {
+    const body = req.body || {};
+    const id = body.id || require('crypto').randomUUID();
+    run(
+      `INSERT OR REPLACE INTO vidi_runs (
+        id, started_at, finished_at, status, mode, items_found, items_pushed, error, duration_ms, metadata
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      body.started_at || new Date().toISOString(),
+      body.finished_at || null,
+      body.status || 'running',
+      body.mode || 'discovery',
+      body.items_found || 0,
+      body.items_pushed || 0,
+      body.error || null,
+      body.duration_ms || null,
+      body.metadata ? JSON.stringify(body.metadata) : null
+    );
+    res.json({ id, status: body.status || 'running' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/vidi/settings — Returns Vidi-related settings from app_settings
+app.get('/api/vidi/settings', (req, res) => {
+  try {
+    const keys = [
+      'vidi.ollamaUrl',
+      'vidi.ollamaPrimaryModel',
+      'vidi.ollamaReasoningModel',
+      'vidi.ollamaAgentModel',
+      'vidi.cloudFallbackEnabled',
+      'vidi.discoveryCron',
+      'vidi.discoveryEnabled',
+      'vidi.defaultChannelId',
+    ];
+    const rows = getAll(`SELECT key, value FROM app_settings WHERE key LIKE 'vidi.%'`);
+    const out = {};
+    for (const r of rows) {
+      const key = r.key.replace('vidi.', '');
+      // Try to JSON-parse, fall back to raw string
+      try { out[key] = JSON.parse(r.value); } catch { out[key] = r.value; }
+    }
+    // Defaults for unset keys
+    if (!out.ollamaUrl) out.ollamaUrl = process.env.OLLAMA_URL || 'http://localhost:12434';
+    if (!out.ollamaPrimaryModel) out.ollamaPrimaryModel = 'qwen3.5:latest';
+    if (!out.ollamaReasoningModel) out.ollamaReasoningModel = 'gemma4:12b';
+    if (!out.ollamaAgentModel) out.ollamaAgentModel = 'ornith:latest';
+    if (out.cloudFallbackEnabled === undefined) out.cloudFallbackEnabled = true;
+    if (!out.discoveryCron) out.discoveryCron = '0 9 * * *';
+    if (out.discoveryEnabled === undefined) out.discoveryEnabled = true;
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/vidi/settings — Update Vidi-related settings
+// Body: { ollamaUrl?, ollamaPrimaryModel?, cloudFallbackEnabled?, discoveryCron?, discoveryEnabled?, defaultChannelId? }
+app.post('/api/vidi/settings', (req, res) => {
+  try {
+    const body = req.body || {};
+    const now = new Date().toISOString();
+    const updates = [];
+    if (body.ollamaUrl !== undefined) updates.push(['vidi.ollamaUrl', body.ollamaUrl]);
+    if (body.ollamaPrimaryModel !== undefined) updates.push(['vidi.ollamaPrimaryModel', body.ollamaPrimaryModel]);
+    if (body.ollamaReasoningModel !== undefined) updates.push(['vidi.ollamaReasoningModel', body.ollamaReasoningModel]);
+    if (body.ollamaAgentModel !== undefined) updates.push(['vidi.ollamaAgentModel', body.ollamaAgentModel]);
+    if (body.cloudFallbackEnabled !== undefined) updates.push(['vidi.cloudFallbackEnabled', JSON.stringify(!!body.cloudFallbackEnabled)]);
+    if (body.discoveryCron !== undefined) updates.push(['vidi.discoveryCron', body.discoveryCron]);
+    if (body.discoveryEnabled !== undefined) updates.push(['vidi.discoveryEnabled', JSON.stringify(!!body.discoveryEnabled)]);
+    if (body.defaultChannelId !== undefined) updates.push(['vidi.defaultChannelId', body.defaultChannelId]);
+    for (const [k, v] of updates) {
+      run(`INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)`, k, v, now);
+    }
+    res.json({ updated: updates.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // --- Refresh job implementation
 async function runYouTubeRefresh(jobId, channelId, signal) {
   const updateJob = (status, progress, currentStep, result, error) => {
@@ -1139,6 +1527,7 @@ async function runYouTubeRefresh(jobId, channelId, signal) {
     updateJob('running', 2, 'Lade eigene Videos...');
     if (signal.aborted) throw new Error('aborted');
     let videoCount = 0;
+    let videosImported = 0;
     try {
       const recentVideos = await youtubeApi.getMyRecentVideos(YT_CACHE_SETTINGS.refreshMaxVideos);
       for (const v of recentVideos) {
@@ -1147,6 +1536,35 @@ async function runYouTubeRefresh(jobId, channelId, signal) {
           const videoStats = await youtubeApi.getVideoStats(v.videoId);
           saveCachedYouTubeVideo(v.videoId, Object.assign({}, v, videoStats));
           videoCount++;
+
+          // Auto-Import: if this YouTube video isn't yet in our videos table,
+          // INSERT a locked published row from the live YouTube data.
+          // (Replaces the vidIQ Phase-1 pattern that lived in runVidiqRefresh.)
+          const existing = getAll('SELECT id FROM videos WHERE video_id = ?', v.videoId);
+          if (existing.length === 0) {
+            try {
+              const publishedAt = v.publishedAt || (videoStats && videoStats.publishedAt) || null;
+              const publishedIso = publishedAt ? new Date(publishedAt).toISOString() : null;
+              const newId = require('crypto').randomUUID();
+              const now = new Date().toISOString();
+              const thumbnail = v.thumbnail || (videoStats && videoStats.thumbnail) || '';
+              const title = v.title || (videoStats && videoStats.title) || '(unbenannt)';
+              run(`INSERT INTO videos (
+                id, title, status, video_format, thumbnail_url,
+                planned_date, published_date, video_id, youtube_url, tags,
+                notes, nix_comment, nix_comment_source, owner, position, script_id,
+                is_locked, created_at, updated_at
+              ) VALUES (?, ?, 'published', ?, ?, ?, ?, ?, ?, '[]', '', '', 'manual', 'dirk', 0, '', 1, ?, ?)`,
+                newId, title, 'longform', thumbnail,
+                null, publishedIso, v.videoId, `https://youtube.com/watch?v=${v.videoId}`,
+                now, now);
+              videosImported++;
+              log.info('[youtube] auto-imported new published video: ' + v.videoId + ' (' + title.slice(0, 50) + ')');
+            } catch (insErr) {
+              log.warn('[youtube] auto-import failed for ' + v.videoId + ':', insErr.message);
+            }
+          }
+
           updateJob('running', 2 + Math.floor((videoCount / Math.max(1, recentVideos.length)) * 1),
             'Videos gecachedt: ' + videoCount + '/' + recentVideos.length);
         } catch (e) {
@@ -1176,7 +1594,7 @@ async function runYouTubeRefresh(jobId, channelId, signal) {
     }
 
     updateJob('running', 4, 'Aktualisiere Video-Daten...');
-    const allVideos = getAll("SELECT id, video_id FROM videos WHERE video_id IS NOT NULL AND video_id != '' AND status != 'archived'");
+    const allVideos = getAll("SELECT id, video_id FROM videos WHERE video_id IS NOT NULL AND video_id != '' AND status != 'archived' AND is_locked = 1");
     let updated = 0;
     for (const v of allVideos) {
       if (signal.aborted) throw new Error('aborted');
@@ -1192,6 +1610,7 @@ async function runYouTubeRefresh(jobId, channelId, signal) {
       channel: channelStats,
       videosCached: videoCount,
       videosUpdated: updated,
+      videosImported,
     });
   } catch (e) {
     if (e.message === 'aborted') {
@@ -1897,6 +2316,57 @@ function runResearchJob(jobId, agentId, brief) {
 function shellEscape(s) {
   return "'" + String(s).replace(/'/g, "'\\''") + "'";
 }
+
+// ─── Logs API ──────────────────────────────────────────────────────────────────
+// GET /api/logs?lines=200&level=INFO|WARN|ERROR&search=foo
+//   lines  — how many tail lines to return (default 200, max 2000)
+//   level  — only return lines with this level or higher (INFO|WARN|ERROR)
+//   search — optional substring filter (case-insensitive)
+// Reads from data/contentix.log (current) + .1/.2/.3 generations if present.
+app.get('/api/logs', (req, res) => {
+  try {
+    const lines = Math.min(parseInt(req.query.lines, 10) || 200, 2000);
+    const level = (req.query.level || '').toUpperCase();
+    const search = (req.query.search || '').toString();
+    const levelRanks = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
+    const minRank = levelRanks[level] != null ? levelRanks[level] : 0;
+
+    // Read from current log + rotated generations, oldest first
+    const files = [LOG_FILE];
+    for (let i = 1; i <= LOG_KEEP_GENERATIONS; i++) {
+      const p = `${LOG_FILE}.${i}`;
+      if (fs.existsSync(p)) files.push(p);
+    }
+    let combined = [];
+    for (const f of files) {
+      try {
+        const content = fs.readFileSync(f, 'utf-8');
+        combined = combined.concat(content.split('\n').filter(Boolean));
+      } catch (_) { /* file unreadable — skip */ }
+    }
+
+    // Filter by level + search, then take tail
+    const filtered = combined.filter((line) => {
+      const m = line.match(/^\[[^\]]+\]\s+\[(\w+)\]/);
+      const lvl = m ? m[1] : 'INFO';
+      if (levelRanks[lvl] == null || levelRanks[lvl] < minRank) return false;
+      if (search && !line.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    });
+    const tail = filtered.slice(-lines);
+
+    res.json({
+      ok: true,
+      totalLines: combined.length,
+      returnedLines: tail.length,
+      logFile: LOG_FILE,
+      bytes: (() => { try { return fs.statSync(LOG_FILE).size; } catch (_) { return 0; } })(),
+      lines: tail,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 
