@@ -1,0 +1,54 @@
+# docker-compose.vidi.yml — Vidi 2.0 als optionales Add-on
+#
+# Standalone-Service für Contentix-Vidi-Integration.
+# Läuft als eigener Container auf Port 8191.
+# Erwartet Contentix auf Port 3038 (für /api/vidi/* und /api/videos).
+# Erwartet Ollama auf Port 12434 (für lokale KI).
+#
+# Start: docker-compose -f docker-compose.vidi.yml up -d
+# Stop:  docker-compose -f docker-compose.vidi.yml down
+#
+# Dieses File ist optional — Contentix funktioniert ohne Vidi.
+
+services:
+  vidi2:
+    image: python:3.12-slim
+    container_name: contentix-vidi2
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./vidi2/src:/app/src:ro
+      - ./vidi2:/app/vidi2:ro
+      - vidi-data:/app/data
+    environment:
+      # Contentix
+      CONTENTIX_URL: "http://host.docker.internal:3038"
+      CONTENTIX_API_KEY: "${CONTENTIX_API_KEY:-}"
+      # Ollama (lokal)
+      OLLAMA_URL: "http://host.docker.internal:12434"
+      OLLAMA_PRIMARY_MODEL: "qwen3.5:latest"
+      OLLAMA_REASONING_MODEL: "gemma4:12b"
+      OLLAMA_AGENT_MODEL: "ornith:latest"
+      # Cloud-Fallback (M3)
+      CLOUD_FALLBACK_ENABLED: "${CLOUD_FALLBACK_ENABLED:-true}"
+      M3_API_URL: "${M3_API_URL:-https://api.minimaxi.chat/v1}"
+      M3_API_KEY: "${M3_API_KEY:-}"
+      # Cron
+      DISCOVERY_CRON: "${DISCOVERY_CRON:-0 9 * * *}"
+      DISCOVERY_ENABLED: "${DISCOVERY_ENABLED:-true}"
+      # Logging
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+    ports:
+      - "8191:8191"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["python3", "src/service.py"]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8191/status', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  vidi-data:
+    driver: local

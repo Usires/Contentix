@@ -93,7 +93,52 @@ function renderBoard() {
   const MAX_VISIBLE = 10;
   const allCards = getAllCards() || [];
 
-  board.innerHTML = COLUMNS.map(col => {
+  // Phase 1.2 v2: Vidi-Inbox als floating Panel (Modal-like) — kein Board-Spalte mehr.
+  // Wenn Vidi installiert ist, rendern wir einen kleinen Toggle-Button links oben
+  // (immer sichtbar auf dem Board) der ein floating Panel auf/abdeckt.
+  // Das Panel ist NICHT im Grid-Layout, also kollidiert es nicht mit den 5 Standardsäulen.
+  const vidiInstalled = typeof vidiIsInstalled === 'function' && vidiIsInstalled();
+  const vidiInboxVisible = vidiInstalled && (localStorage.getItem('contentix.vidiInboxVisible') === '1');
+
+  // Floating Panel: nur rendern wenn installed && visible. Position fixed-top-left,
+  // 380px breit, bleibt sichtbar bis User es zumacht.
+  // Body-Klasse für backdrop-dimming wenn offen.
+  const vidiPanelHtml = (vidiInstalled && vidiInboxVisible) ? `
+    <div id="vidiInboxPanel" class="vidi-panel" data-column="vidi-inbox">
+      <div class="vidi-panel__header">
+        <span class="vidi-panel__title">💡 Vidi-Inbox</span>
+        <span class="vidi-panel__count" id="vidiInboxCount">…</span>
+        <button class="vidi-panel__close" data-action="toggle-vidi-inbox" title="Vidi-Inbox schließen">✕</button>
+      </div>
+      <div class="vidi-panel__body" id="vidiInboxCards">
+        <div class="board__empty">Lade Vorschläge…</div>
+      </div>
+    </div>
+    <div class="vidi-panel-backdrop" data-action="toggle-vidi-inbox"></div>
+  ` : '';
+
+  // Toggle-Button: immer sichtbar wenn Vidi installiert (Default: zugeklappt).
+  // Sitzt links oben im Board mit position:absolute. Klick öffnet Panel.
+  const vidiToggleStub = vidiInstalled ? `
+    <button class="vidi-toggle" data-action="toggle-vidi-inbox"
+            title="Vidi-Inbox ${vidiInboxVisible ? 'schließen' : 'einblenden'} (${window.vidiStatus && window.vidiStatus.lastRun ? 'letzter Run ' + new Date(window.vidiStatus.lastRun).toLocaleString('de-DE') : 'cron-getriggert'})">
+      <span class="vidi-toggle__icon">💡</span>
+      <span class="vidi-toggle__text">Vidi-Inbox</span>
+      <span class="vidi-toggle__count" id="vidiToggleCount">…</span>
+    </button>
+  ` : '';
+
+  // Apply expanded class to board for layout-shift when Vidi-Inbox is visible.
+  if (board) {
+    board.classList.toggle('vidi-expanded', !!(vidiInstalled && vidiInboxVisible));
+  }
+  // Apply body class for backdrop when panel is visible
+  if (typeof document !== 'undefined' && document.body) {
+    document.body.classList.toggle('vidi-panel-open', !!(vidiInstalled && vidiInboxVisible));
+  }
+
+  // Render standard columns (always).
+  const standardColumns = COLUMNS.map(col => {
     const colCards = allCards.filter(c => STATUS_MAP[c.status] === col.id);
 
     return `
@@ -115,8 +160,252 @@ function renderBoard() {
     </div>`;
   }).join('');
 
+  // Phase 1.2 v2: Toggle-Button SITZT im Board (oben-links), Panel ist floating
+  // und wird in #vidiInboxPanelContainer (siehe unten) ausserhalb des Boards gerendert.
+  board.innerHTML = vidiToggleStub + standardColumns;
+
+  // Panel: in ein separates Container ausserhalb des Boards rendern, der im Layout
+  // fixed-positioniert ist. So stört es das Board-Grid nicht.
+  let panelContainer = document.getElementById('vidiInboxPanelContainer');
+  if (!panelContainer) {
+    panelContainer = document.createElement('div');
+    panelContainer.id = 'vidiInboxPanelContainer';
+    panelContainer.className = 'vidi-panel-container';
+    // Vor #kanbanBoard einfügen, damit es im DOM vor dem Board ist
+    const parent = board.parentNode;
+    parent.insertBefore(panelContainer, board);
+  }
+  panelContainer.innerHTML = vidiPanelHtml;
+
+  // Hook the Vidi-inbox refresh into the global so app.js can call it.
+  window.refreshKanbanBoard = function () { renderBoard(); };
+
   setupDragAndDrop();
   setupCardListeners();
+
+  // Fetch Vidi inbox items if panel is visible.
+  if (vidiInstalled && vidiInboxVisible) {
+    fetchAndRenderVidiInbox();
+    // Drag-Handler braucht keinen Re-Bind hier: initVidiPanelDrag() IIFE (unten)
+    // nutzt document-level delegated events die renderBoard() ueberleben.
+  }
+}
+
+// Phase 1.2 v4: Vidi-Panel draggable — DOCUMENT-LEVEL delegated events.
+// Wir installieren die Listener EINMAL beim Init auf `document`, nicht am panel.
+// Dadurch ueberleben sie jeden renderBoard()-DOM-Replacement ohne Re-Bindung.
+// Drag funktioniert sobald im DOM ein .vidi-panel mit .vidi-panel__header existiert.
+(function initVidiPanelDrag() {
+  if (window._vidiPanelDragInited) return;
+  window._vidiPanelDragInited = true;
+
+  function getPanelAndHeader() {
+    const panel = document.getElementById('vidiInboxPanel');
+    if (!panel) return null;
+    const header = panel.querySelector('.vidi-panel__header');
+    if (!header) return null;
+    return { panel, header };
+  }
+
+  function shouldStartDrag(target) {
+    if (!target) return false;
+    if (target.closest('.vidi-panel__close')) return false;
+    if (target.closest('.vidi-panel__count')) return false;
+    // Nur wenn der Klick im Header-Bereich ist
+    return !!target.closest('.vidi-panel__header');
+  }
+
+  function applyDrag(panel, anchorX, anchorY, clientX, clientY) {
+    // Phase 1.2 v5 Bug-Fix: direkte top/left-Inline-Styles statt CSS-Custom-Properties.
+    // Vermeidet calc()+var()-Layer-Verzögerungen die Drag-Jumps verursachen.
+    // Anchor (relativer Maus-Versatz zum Panel-TopLeft) + neue Maus-Position = neue Position.
+    let newTop = clientY - anchorY;
+    let newLeft = clientX - anchorX;
+    // Bounds: Panel muss mindestens 100px breit und 60px hoch im Viewport sichtbar bleiben.
+    const minVisible = 100;
+    const minVisibleV = 60;
+    newTop = Math.max(10, Math.min(newTop, window.innerHeight - minVisibleV));
+    newLeft = Math.max(10, Math.min(newLeft, window.innerWidth - minVisible));
+    panel.style.top = newTop + 'px';
+    panel.style.left = newLeft + 'px';
+    return { offX: newLeft, offY: newTop };
+  }
+
+  // Mouse drag (desktop).
+  document.addEventListener('mousedown', (e) => {
+    const refs = getPanelAndHeader();
+    if (!refs) return;
+    if (!shouldStartDrag(e.target)) return;
+    e.preventDefault();
+    const { panel } = refs;
+    panel.classList.add('is-dragging');
+    const rect = panel.getBoundingClientRect();
+    const anchorX = e.clientX - rect.left;
+    const anchorY = e.clientY - rect.top;
+
+    const onMove = (mv) => {
+      mv.preventDefault();
+      applyDrag(panel, anchorX, anchorY, mv.clientX, mv.clientY);
+    };
+    const onUp = () => {
+      panel.classList.remove('is-dragging');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      try {
+        // Phase 1.2 v5: persist via style.top/left (raw px values), nicht via CSS-Custom-Property.
+        // Wir speichern die Differenz zur Default-Position (12, 70) als relative Koordinaten.
+        const curTop = parseInt(panel.style.top || '70', 10);
+        const curLeft = parseInt(panel.style.left || '12', 10);
+        localStorage.setItem('contentix.vidiPanelX', (curLeft - 12) + 'px');
+        localStorage.setItem('contentix.vidiPanelY', (curTop - 70) + 'px');
+      } catch (e) {}
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  // Touch drag (mobile/tablet).
+  document.addEventListener('touchstart', (e) => {
+    const refs = getPanelAndHeader();
+    if (!refs) return;
+    if (e.touches.length !== 1) return;
+    if (!shouldStartDrag(e.target)) return;
+    const touch = e.touches[0];
+    const { panel } = refs;
+    panel.classList.add('is-dragging');
+    const rect = panel.getBoundingClientRect();
+    const anchorX = touch.clientX - rect.left;
+    const anchorY = touch.clientY - rect.top;
+
+    const onMove = (mv) => {
+      if (mv.touches.length !== 1) return;
+      mv.preventDefault();
+      const ct = mv.touches[0];
+      applyDrag(panel, anchorX, anchorY, ct.clientX, ct.clientY);
+    };
+    const onEnd = () => {
+      panel.classList.remove('is-dragging');
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onEnd);
+      try {
+        // Phase 1.2 v5: persist via style.top/left (raw px values).
+        const curTop = parseInt(panel.style.top || '70', 10);
+        const curLeft = parseInt(panel.style.left || '12', 10);
+        localStorage.setItem('contentix.vidiPanelX', (curLeft - 12) + 'px');
+        localStorage.setItem('contentix.vidiPanelY', (curTop - 70) + 'px');
+      } catch (e) {}
+    };
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onEnd);
+  }, { passive: true });
+
+  // Restore panel position once on init.
+  try {
+    const x = parseInt(localStorage.getItem('contentix.vidiPanelX') || '0', 10);
+    const y = parseInt(localStorage.getItem('contentix.vidiPanelY') || '0', 10);
+    // Apply to any panel that exists now + to documentElement defaults for future open()s.
+    const panel = document.getElementById('vidiInboxPanel');
+    if (panel) {
+      panel.style.top = (70 + y) + 'px';
+      panel.style.left = (12 + x) + 'px';
+    }
+  } catch (e) {}
+})();
+
+// Reset-Helper for debugging via Console: window.resetVidiPanelPosition().
+window.resetVidiPanelPosition = function () {
+  try {
+    localStorage.removeItem('contentix.vidiPanelX');
+    localStorage.removeItem('contentix.vidiPanelY');
+    console.log('[Vidi] Panel-Position zurueckgesetzt. Browser-Reload noetig.');
+  } catch (e) {}
+};
+
+// Phase 1.2: Toggle Vidi-Inbox visibility (localStorage-persisted).
+// Called from the ✕-button on the lane OR from the stub button.
+window.toggleVidiInbox = function () {
+  const current = localStorage.getItem('contentix.vidiInboxVisible') === '1';
+  localStorage.setItem('contentix.vidiInboxVisible', current ? '0' : '1');
+  // Re-render without re-fetching everything.
+  if (typeof window.refreshKanbanBoard === 'function') {
+    window.refreshKanbanBoard();
+  }
+};
+
+// Phase 1.2: Vidi-Inbox items aus /api/vidi/inbox fetchen und rendern.
+async function fetchAndRenderVidiInbox() {
+  const container = document.getElementById('vidiInboxCards');
+  const counter = document.getElementById('vidiInboxCount');
+  if (!container) return;
+
+  try {
+    const res = await fetch(`${API}/vidi/inbox?status=inbox&limit=10`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const items = await res.json();
+    if (counter) counter.textContent = items.length;
+
+    if (!items.length) {
+      container.innerHTML = `<div class="board__empty">Keine Vorschläge. Vidi läuft per Cron (09:00).</div>`;
+      return;
+    }
+
+    container.innerHTML = items.map(renderVidiSuggestionCard).join('');
+    setupVidiSuggestionListeners();
+  } catch (e) {
+    container.innerHTML = `<div class="board__empty board__empty--error">Vidi-Inbox nicht ladbar: ${e.message}</div>`;
+  }
+}
+
+// Phase 1.2: Render single Vidi-suggestion card.
+function renderVidiSuggestionCard(item) {
+  const score = (item.confidence_score || 0).toFixed(2);
+  const source = item.source || 'vidi';
+  const channelBadge = item.target_channel_id ? `<span class="kanban-vidi__channel-badge">${escapeHtml(item.target_channel_id)}</span>` : '';
+  return `
+    <div class="kanban-vidi" data-id="${item.id}">
+      <div class="kanban-vidi__header">
+        <span class="kanban-vidi__source">${escapeHtml(source)}</span>
+        <span class="kanban-vidi__score">Score ${score}</span>
+      </div>
+      <div class="kanban-vidi__title">${escapeHtml(item.title || '(ohne Titel)')}</div>
+      ${item.hook_line ? `<div class="kanban-vidi__hook">${escapeHtml(item.hook_line)}</div>` : ''}
+      ${item.why_now ? `<details class="kanban-vidi__why"><summary>Warum jetzt?</summary>${escapeHtml(item.why_now)}</details>` : ''}
+      ${item.script_skeleton ? `<details class="kanban-vidi__skel"><summary>Script-Skelett</summary><pre class="kanban-vidi__skel-pre">${escapeHtml(item.script_skeleton)}</pre></details>` : ''}
+      ${channelBadge}
+      <div class="kanban-vidi__actions">
+        <button class="btn btn--primary btn--small" data-vidi-action="approve" data-id="${item.id}">→ Approve (Research)</button>
+        <button class="btn btn--secondary btn--small" data-vidi-action="reject" data-id="${item.id}">✕ Reject</button>
+      </div>
+    </div>
+  `;
+}
+
+// Phase 1.2: Approve/Reject click handlers.
+function setupVidiSuggestionListeners() {
+  document.querySelectorAll('[data-vidi-action]').forEach(btn => {
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const id = btn.dataset.id;
+      const action = btn.dataset.vidiAction;
+      try {
+        const res = await fetch(`${API}/vidi/inbox/${id}/${action}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: 'dirk' }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'unknown' }));
+          showToast(`Vidi-${action} fehlgeschlagen: ${err.error || res.status}`, 'error');
+          return;
+        }
+        showToast(action === 'approve' ? '✅ Vidi-Vorschlag approved — in Research-Lane' : '✓ Vidi-Vorschlag rejected', 'info');
+        fetchAndRenderVidiInbox();  // refresh
+        if (action === 'approve') loadContent(); // re-render kanban so new video shows
+      } catch (e) {
+        showToast(`Vidi-${action} Fehler: ${e.message}`, 'error');
+      }
+    });
+  });
 }
 
 // ─── Render Single Card ────────────────────────────────────────────────────────
@@ -254,7 +543,23 @@ function setupCardListeners() {
   const board = document.getElementById('kanbanBoard');
   if (!board) return;
 
+  // Phase 1.2 Bug-Fix: Use a single delegated click listener on the board
+  // (parent of all dynamic columns). This survives re-renders because
+  // innerHTML-replacement doesn't affect listeners on PARENT elements.
+  // The old code added listeners to .kanban-card__action elements directly,
+  // which got wiped on every renderBoard().
   board.addEventListener('click', async (e) => {
+    // Vidi-Inbox toggle (✕-button on lane OR stub-button).
+    // Intercept FIRST so toggle-buttons (which live in column headers,
+    // not in kanban-cards) don't get eaten by the kanban-card handler.
+    const vidiToggleBtn = e.target.closest('[data-action="toggle-vidi-inbox"]');
+    if (vidiToggleBtn) {
+      if (typeof window.toggleVidiInbox === 'function') {
+        window.toggleVidiInbox();
+      }
+      return;
+    }
+
     const btn = e.target.closest('.kanban-card__action');
     if (!btn) {
       // Card body click → open modal (but not button clicks)

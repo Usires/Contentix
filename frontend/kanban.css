@@ -12,6 +12,7 @@
   gap: 16px;
   align-items: start;
   min-height: calc(100vh - 220px);
+  position: relative; /* Phase 1.2 Bug-Fix: lässt absolute-positioned Toggle-Stub richtig positionieren */
 }
 
 .board__column {
@@ -624,4 +625,275 @@
   color: var(--text-muted);
   padding: 8px;
   border-top: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+/* ─── Vidi 2.0 Inbox-Lane (Phase 1.2, 2026-09-17) ─────────────────────────────── */
+
+.board__column--vidi-inbox { color: var(--accent, #ffcb6b); }
+.board__column--vidi-inbox .board__column-header { border-color: var(--accent, #ffcb6b); }
+
+/* Phase 1.2 v5 Theming: Vorschlags-Card nutzt die Theme-Tokens (--nix-violet, --lavender-mid,
+   --celtic-blue) statt Magic-Hex-Werte. Sieht nun konsistent zum Rest von Contentix aus. */
+.kanban-vidi {
+  background: var(--nix-soft);
+  border: 1px solid var(--nix-violet);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  transition: background 0.18s ease, box-shadow 0.18s ease;
+}
+.kanban-vidi:hover {
+  background: var(--nix-glow);
+  box-shadow: 0 2px 12px rgba(124, 92, 191, 0.25);
+}
+.kanban-vidi__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.kanban-vidi__source {
+  background: var(--nix-soft);
+  padding: 1px 7px;
+  border-radius: 4px;
+  color: var(--nix-violet);
+  font-weight: 600;
+}
+.kanban-vidi__score {
+  font-weight: 700;
+  color: var(--celtic-blue);
+}
+.kanban-vidi__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-on-dark);
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+.kanban-vidi__hook {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text-on-dark-secondary);
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+.kanban-vidi__why,
+.kanban-vidi__skel {
+  font-size: 11px;
+  margin-bottom: 6px;
+  color: var(--text-on-dark-secondary);
+}
+.kanban-vidi__why summary,
+.kanban-vidi__skel summary {
+  cursor: pointer;
+  color: var(--nix-violet);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 0;
+}
+.kanban-vidi__why[open] summary,
+.kanban-vidi__skel[open] summary {
+  margin-bottom: 4px;
+}
+.kanban-vidi__skel-pre {
+  background: rgba(0, 0, 0, 0.30);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin: 0;
+  font-size: 11px;
+  white-space: pre-wrap;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-on-dark);
+}
+.kanban-vidi__channel-badge {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 3px;
+  background: var(--celtic-light);
+  color: var(--celtic-blue);
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+}
+.kanban-vidi__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  border-top: 1px dashed var(--lavender-mid);
+  padding-top: 8px;
+}
+.kanban-vidi__actions .btn--small {
+  font-size: 11px;
+  padding: 4px 8px;
+  flex: 1;
+}
+
+/* Empty-state für Vidi-Inbox */
+.board__empty--error {
+  border-left: 3px solid var(--warning);
+  padding-left: 8px;
+  font-style: italic;
+}
+
+/* Phase 1.2 v2: Toggle-Button (immer wenn Vidi installiert ist, oben-links im Board).
+   Klick -> floating Panel (siehe unten). Theme: NIX-Violet + Lavendel — passt zum Rest. */
+.vidi-toggle {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, var(--nix-violet) 0%, var(--nix-violet-dim) 100%);
+  border: 1px solid var(--nix-violet);
+  border-radius: 16px;
+  color: var(--text-on-dark);
+  padding: 6px 12px;
+  cursor: pointer;
+  font-family: 'Lexend', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 2px 8px var(--nix-glow);
+  transition: background 0.18s ease, transform 0.12s ease, box-shadow 0.12s ease;
+}
+.vidi-toggle:hover {
+  background: linear-gradient(135deg, var(--nix-violet-dim) 0%, var(--nix-violet) 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--nix-violet) 35%, transparent);
+}
+.vidi-toggle:active {
+  transform: translateY(0);
+}
+.vidi-toggle__icon { font-size: 14px; }
+.vidi-toggle__text { color: var(--text-on-dark); letter-spacing: 0.2px; }
+.vidi-toggle__count {
+  background: var(--nix-soft);
+  border-radius: 8px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 18px;
+  text-align: center;
+  color: var(--text-on-dark);
+}
+.vidi-toggle__count:empty { display: none; }
+
+/* Phase 1.2 v2: Floating Panel. Theme: dunkler Background mit NIX-Violet Akzent. */
+.vidi-panel-container { /* Container im DOM, Panel wird per fixed positioniert. */ }
+.vidi-panel {
+  position: fixed;
+  top: 70px;
+  left: 12px;
+  width: 380px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 90px);
+  z-index: 200;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--nix-violet);
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--nix-glow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: vidiPanelFadeIn 0.12s ease-out;
+  will-change: top, left;
+}
+.vidi-panel.is-dragging {
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.7), 0 0 0 1px color-mix(in srgb, var(--nix-violet) 35%, transparent);
+  cursor: grabbing !important;
+  user-select: none;
+}
+@keyframes vidiPanelFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.vidi-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, var(--nix-violet) 0%, var(--nix-violet-dim) 100%);
+  border-bottom: 1px solid var(--nix-glow);
+  color: var(--text-on-dark);
+  cursor: grab;
+  user-select: none;
+}
+.vidi-panel__header:active { cursor: grabbing; }
+.vidi-panel__header::before {
+  /* Drei Striche als visuelles Drag-Indikator */
+  content: "\2266\2266"; /* UTF-8 ⋮⋮ als Hex */
+  font-size: 14px;
+  letter-spacing: -3px;
+  opacity: 0.5;
+  margin-right: 4px;
+}
+.vidi-panel__title {
+  font-family: 'Lexend', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  flex: 1;
+  color: var(--text-on-dark);
+}
+.vidi-panel__count {
+  background: rgba(255, 255, 255, 0.20);
+  border-radius: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-on-dark);
+}
+.vidi-panel__close {
+  background: transparent;
+  border: 1px solid var(--nix-soft);
+  color: var(--text-on-dark);
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  transition: background 0.18s ease;
+}
+.vidi-panel__close:hover { background: var(--nix-soft); }
+.vidi-panel__body {
+  overflow-y: auto;
+  padding: 12px;
+  flex: 1;
+}
+/* Item-Panels brauchen kompaktere Margins (sind ja Vorschläge, nicht Content-Karten). */
+.vidi-panel__body .kanban-vidi {
+  font-size: 12px;
+}
+.vidi-panel__body .kanban-vidi__title { font-size: 13px; }
+.vidi-panel__body .kanban-vidi__hook { font-size: 11px; margin-bottom: 6px; }
+.vidi-panel__body .kanban-vidi__actions .btn--small { font-size: 10px; padding: 3px 6px; }
+
+/* Backdrop dimmt die Seite leicht wenn Panel offen. */
+.vidi-panel-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 199;
+  background: rgba(26, 21, 32, 0.35);
+  cursor: pointer;
+}
+body.vidi-panel-open { /* kein extra style noetig, dient nur als JS-flag */ }
+
+/* Phase 1.2: Wenn die Lane expandiert ist, schiebt sie die Standard-Spalten sanft nach rechts.
+   Wir nutzen einen Padding-Left-Trick statt der Spalte im Flex-Layout, damit Layout-Shifts
+   gleichmäßig animiert werden können. */
+#kanbanBoard.vidi-expanded {
+  padding-left: 16px;
+  transition: padding-left 0.22s ease;
 }

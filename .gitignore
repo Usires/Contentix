@@ -44,3 +44,9 @@ mockup/
 playwright-report/
 test-results/
 playwright/.cache/
+
+# Python (Vidi 2.0 service)
+vidi2/venv/
+vidi2/**/__pycache__/
+*.pyc
+*.pyo
