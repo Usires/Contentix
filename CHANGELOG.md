@@ -47,6 +47,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     First live run produced a real card:
     *"Warcraft III unter Linux: Der ultimative Guide für Mods & Performance"*
     with confidence 0.85.
+  - **✅ LILAC parser updated to current archive format (post-fix
+    follow-up):** The original `lilac_archive.load_recent_items`
+    assumed a list-of-articles schema (`[{"title", "url", "score"},
+    ...]`) but the current LILAC newsletter format (since the May
+    2026 redesign) only stores *indicators* in `meta.json`
+    (`{youtube: bool, youtube_indices: [int, ...]}`) and keeps the
+    article titles/URLs in the matching `.html` file. Without
+    this fix, `stage_pull()` got 0 LILAC items on every run.
+    New parser:
+    - Reads `youtube_indices` from `meta.json`.
+    - Opens the matching `<date>.html` and extracts each `<h3>`
+      article in document order via regex.
+    - Strips the 🎬 prefix that LILAC adds to YT-scored items.
+    - Returns scored items (score=5) so the classifier sees them.
+    Live test: `load_recent_items(hours=72)` now returns 7 items
+    from the 2026-09-24 newsletter (previously 0). Note: the
+    current LILAC topics are medical (`GOÄ-Reform`, `NIH grants`,
+    `GKV-Fachgruppenzuordnung`) which the channel-fit classifier
+    correctly filters out — the fix is technical, not topical.
   - **⚠️ Known limitations:** (1) `lilac_archive.load_recent_items`
     returns nothing because the LILAC newsletter hasn't run since
     April 2026 — the YT-search half of the pipeline works fine. (2)
