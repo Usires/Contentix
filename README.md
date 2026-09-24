@@ -293,6 +293,92 @@ gracefully responds with a clear error message.
 
 ---
 
+## Vidi 2.0 — proactive topic discovery (optional add-on)
+
+The original Vidi is a **pull** service: you click a button, it
+researches one video. **Vidi 2.0** is a **push** service: it
+watches LILAC + YouTube trending in the background, picks topics
+that fit your channel, and pushes them into a floating
+**Vidi-Inbox** panel in the Kanban view.
+
+The default Contentix install does **not** include Vidi 2.0 — it
+runs as a separate FastAPI process on port 8191, talks to
+Contentix via `/api/vidi/*`, and uses local Ollama models
+(qwen3.5 for bulk classification, gemma4:12b for reasoning,
+ornith-1.5:9b for synthesis) to keep everything private.
+
+### Why two services instead of one?
+
+- **Independent deploys.** Update Contentix without restarting
+  Vidi; roll back Vidi without touching Contentix. Each has its
+  own git tag.
+- **Independent resources.** Vidi's Ollama calls (slow, 5–30 s
+  per reasoning call) don't block Contentix's UI requests.
+- **Independent failures.** Vidi down ≠ Contentix down. The
+  frontend detects via `GET /api/vidi/status` and gracefully
+  hides the Vidi-Inbox panel if the service is unreachable.
+
+### Quick start
+
+```bash
+# In a separate terminal, from the Contentix repo root:
+./venv/bin/python3 vidi2/src/service.py
+
+# Or via Docker (recommended for production):
+docker-compose -f docker-compose.vidi.yml up -d
+
+# Verify it's running:
+curl -s http://localhost:8191/status | jq
+```
+
+### Triggering a discovery run
+
+```bash
+# Manual trigger (also runs automatically via cron at 09:00):
+curl -X POST http://localhost:8191/run/discovery \
+  -H "Content-Type: application/json" \
+  -d '{"maxItems": 5}'
+```
+
+Suggestions appear in the Vidi-Inbox panel as floating cards.
+Click `✓ Approve` to create a Kanban card in the research lane,
+or `✗ Reject` to archive it.
+
+### Architecture
+
+```
+┌─────────────────────┐         ┌─────────────────────┐
+│   Contentix UI      │         │   Vidi 2.0 Service  │
+│   (Kanban view)     │◄────────│   (FastAPI :8191)   │
+│                     │ /api/   │                     │
+│   Vidi-Inbox panel  │  vidi/* │   Pull→Classify→    │
+└─────────────────────┘         │   Trend→Synthesize  │
+                                │        │            │
+                                │        ▼            │
+                                │   Ollama :12434     │
+                                │   (qwen3.5,         │
+                                │    gemma4:12b,      │
+                                │    ornith-1.5:9b)   │
+                                └─────────────────────┘
+```
+
+### Environment variables (Vidi side)
+
+| Variable | Default | What it controls |
+|---|---|---|
+| `OLLAMA_URL` | `http://localhost:12434` | Ollama endpoint |
+| `OLLAMA_PRIMARY_MODEL` | `qwen3.5:latest` | Bulk classifier |
+| `OLLAMA_REASONING_MODEL` | `gemma4:12b` | Trend + synth reasoning |
+| `OLLAMA_AGENT_MODEL` | `ornith-1.5:9b` | Synthesis-style output |
+| `DISCOVERY_CRON` | `0 9 * * *` | When to auto-trigger (cron expression) |
+| `DISCOVERY_ENABLED` | `true` | Disable to skip cron-triggered runs |
+| `CLOUD_FALLBACK_ENABLED` | `false` | Allow M3 cloud as fallback for synthesis |
+| `LILAC_NEWSLETTER_URL` | `http://localhost:8182/newsletter/lilac-archive.json` | Source for LILAC archive |
+
+Full spec, prompts, and reasoning: see `vidi2/SPEC.md`.
+
+---
+
 ## Troubleshooting
 
 ### "EADDRINUSE" on startup

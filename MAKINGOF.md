@@ -823,3 +823,113 @@ also works for scripted refreshes (cron, etc.) that bypass the
 frontend.
 
 By Nix 🐧 & Dirk, 2026. *"Don't make the user pay for the absence of feedback."*
+
+### Vidi 2.0 Phase 3 — proactive topic discovery — 2026-09-24
+
+The morning was OAuth self-service (`bc53007`) and a logs card
+for the Settings view (`06693d2`). The afternoon turned out to be
+the day Vidi 2.0 stopped being a placeholder.
+
+Background: the Vidi 2.0 service (`vidi2/`) had been on disk for
+a week — discovery.py with the full Pull→Classify→Trend→Synthesize→
+Push pipeline, FastAPI service.py wrapping it, classifier.py and
+reasoner.py modules, 6 prompt templates, and a README that
+promised the feature was live. None of it ran. The `/run/discovery`
+endpoint hit `_discovery_stub()` which returned a single
+"Stub-Vorschlag: Phase-3-Placeholder" card. Honest because the
+code comment said so: *"Phase 3 will replace this with the real
+pipeline."*
+
+The fix started as a 30-minute audit ("find out why nothing
+works"). It turned into a full evening.
+
+Three bugs in the wiring, each invisible from the outside:
+
+**1. Wrong MCP URL.** `yt_search.call_mcp_search` posted to
+`/mcp/call` — that endpoint doesn't exist. The YouTube MCP server
+actually exposes tools at `POST /tool/<tool-name>`. Easy grep
+against the MCP server's route table fixed it.
+
+**2. CamelCase vs. snake_case.** MCP returns `{videoId, publishedAt,
+viewCount}` (camelCase, JavaScript-style). The Python consumer
+read `v.get("video_id") or v.get("id")` (snake_case). The dedup
+loop filtered every video to zero because both keys were None.
+Fixed by normalising inside `call_mcp_search` so downstream code
+sees snake_case only.
+
+**3. Thinking models burn the JSON budget.** qwen3.5, ornith-1.5,
+and gemma4 all have Ollama's `thinking` capability. Without
+`think: false` in the chat request, the model burns the entire
+`num_predict` budget on internal reasoning and returns 0 chars of
+actual JSON content. `chat_json` parsed `null`, classifier
+returned 0 items, and the pipeline terminated cleanly with
+`cards_pushed: 0` — the worst kind of bug because there's no
+error to investigate. Fix: pass `"think": false` in the chat
+payload.
+
+After these three, the first live run produced a real card:
+*"Warcraft III unter Linux: Der ultimative Guide für Mods &
+Performance"*, confidence 0.85. Not world-changing content but a
+real artifact from a real pipeline.
+
+**LILAC archive path correction.** The first parser fix was
+tested against `/home/dirk/reverse-proxy/html/apricot/` and
+returned 7 medical-news items (GOÄ-Reform, NIH grants, GKV-
+Fachgruppenzuordnung). The classifier correctly filtered them
+out as off-channel. Dirk pointed out at 00:24 that Project LILAC
+(Linux) and Project Apricot (medical) live in different
+directories — `newsletter/` vs `apricot/`. Default path changed,
+15 Linux-relevant items now flow in (Steam Deck guides, NVIDIA
+595 Wayland driver, KeePassXC 2.8, SparkyLinux Tiamat, etc.).
+
+**Model A/B test (ornith vs. ornith-1.5:9b).** Dirk installed
+ornith-1.5:9b earlier in the day. Same prompt, same settings,
+"YouTube-Stratege für die Idee 'Wie Steam Deck das Linux-Gaming
+verändert hat'". ornith:latest with 1000-token budget produced
+300 words of generic YouTube-strategy talk. ornith-1.5:9b with
+2000-token budget produced 420 words of sharper content — concrete
+narrative hooks like "Nvidia ist bis heute der Zwickel", "AMD vs
+Nvidia ist ein echter Konfliktnarrativ", "Gabe-Newell-Interviews
+als Quellen". Insight density per token: clearly better on the
+1.5 version. Switched Vidi's default agent model to
+`ornith-1.5:9b` via env-var override on `OLLAMA_AGENT_MODEL`.
+
+**Two production cleanups while at it:**
+- Fixed the YT-Cache-WARN that filled every Contentix startup
+  log: `loadYTSettings` was running at module-load before
+  `initDB()` populated `db`. Moved the load block inside
+  `initDB().then(...)`. Settings actually persist across restarts
+  now instead of silently resetting to defaults.
+- Replaced the LILAC meta.json format assumption
+  (list-of-articles schema) with the current
+  indicators-in-meta + articles-in-HTML schema. Now reads
+  `youtube_indices: [10, 11, 12, 13, 14]` from the meta file and
+  extracts the matching `<h3>` blocks from the HTML.
+
+**Sidebar sort bug on the LILAC index page.** `meta-list.json` is
+sorted descending (newest first) but the sidebar code did
+`list.slice(-10).reverse()` — which meant: take the *oldest* ten
+(reverse-engineered slice), then reverse them, so the sidebar
+showed 2026-08-29 at the top and 2026-09-11 at the bottom. Dirk
+called it "irritating" at 00:27. Fixed to `list.slice(0, 10)` so
+the newest entries show first.
+
+**Ollama ghost job.** Separately: a `llama-server` had been
+running for hours generating 31,492 tokens nobody was reading.
+Vidi's `discovery.py` starts an Ollama call but never cancels it
+when the response comes back empty (`cards_pushed: 0`). The
+orphaned worker kept generating. Killed via `sudo kill 4007205`,
+GPU went from 97% / 65°C / 160W to 0% / 42°C / 6W instantly.
+Lesson logged: asynchronous LLM calls need timeouts + cancellation
+hooks, not just `try/except` on the response.
+
+**What still doesn't work.** (1) YouTube Data API v3 has a
+per-day Search-Query quota — heavy testing in one session burns
+it. (2) Classifier is conservative: ~30% of items come back with
+`channel_fit >= 0.5`. Reasonable, but a few tuning iterations
+would raise throughput. (3) Vidi's cron trigger exists in the
+code but isn't wired to systemd — next session. (4) Mode 3
+(script drafting) is still a stub, per SPEC.md.
+
+By Nix 🐧 & Dirk, 2026. *"The worst kind of bug is the one that terminates cleanly."*
+

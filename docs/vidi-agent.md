@@ -7,6 +7,21 @@ identity, and uses the vidIQ MCP for all data collection.
 This document explains what Vidi is, how it integrates with
 Contentix, and how to operate it.
 
+> **Two Vidis, one name.** There are now two services called Vidi:
+>
+> 1. **Vidi 1.0** (this doc): an OpenClaw subagent spawned by the
+>    🔭 button on a Kanban card. Pull-mode — reacts to a user click.
+>    Uses vidIQ MCP for data.
+> 2. **Vidi 2.0**: a separate FastAPI service on port 8191 that
+>    pushes topic suggestions into a floating inbox panel. Push-mode —
+>    cron-triggered, runs without user interaction. Uses local Ollama
+>    models. **Opt-in deploy** — Contentix works without it.
+>
+> Both coexist. The 🔭 button still uses Vidi 1.0 (subagent). The
+> Vidi-Inbox panel uses Vidi 2.0 (service). See
+> [`vidi2/SPEC.md`](../vidi2/SPEC.md) and the "Vidi 2.0" section
+> of the top-level README for the push service.
+
 ---
 
 ## TL;DR
