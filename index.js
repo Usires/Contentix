@@ -938,20 +938,9 @@ const YT_DEFAULTS = {
 
 let YT_CACHE_SETTINGS = { ...YT_DEFAULTS };
 
-// Load persisted settings on startup (best-effort, falls back to defaults)
-try {
-  const settingsRows = getAll("SELECT key, value FROM app_settings WHERE key LIKE 'yt.%'");
-  for (const r of settingsRows) {
-    const key = r.key.replace('yt.', '');
-    if (key in YT_CACHE_SETTINGS) {
-      const num = Number(r.value);
-      if (Number.isFinite(num)) YT_CACHE_SETTINGS[key] = num;
-    }
-  }
-  log.info('Loaded YouTube cache settings:', YT_CACHE_SETTINGS);
-} catch (e) {
-  log.warn('Could not load YouTube cache settings:', e.message);
-}
+// Load persisted settings on startup (moved into initDB().then() below
+// — the DB isn't ready at module-load time, so loading here would
+// always fail with "Cannot read properties of undefined (reading 'prepare')".)
 
 function saveYTSettings() {
   for (const [key, value] of Object.entries(YT_CACHE_SETTINGS)) {
@@ -2371,6 +2360,24 @@ app.get('/api/logs', (req, res) => {
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 initDB().then(() => {
+  // Load persisted YouTube cache settings now that the DB is ready.
+  // (Previously this ran at module-load time and always failed with
+  // "Cannot read properties of undefined (reading 'prepare')" because
+  // `db` was assigned later in initDB().then().)
+  try {
+    const settingsRows = getAll("SELECT key, value FROM app_settings WHERE key LIKE 'yt.%'");
+    for (const r of settingsRows) {
+      const key = r.key.replace('yt.', '');
+      if (key in YT_CACHE_SETTINGS) {
+        const num = Number(r.value);
+        if (Number.isFinite(num)) YT_CACHE_SETTINGS[key] = num;
+      }
+    }
+    log.info('Loaded YouTube cache settings:', YT_CACHE_SETTINGS);
+  } catch (e) {
+    log.warn('Could not load YouTube cache settings:', e.message);
+  }
+
   app.listen(PORT, '0.0.0.0', () => {
     log.info(`Contentix v${getVersion()} running on http://0.0.0.0:${PORT}`);
   });

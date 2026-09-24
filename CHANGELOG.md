@@ -27,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     colors via tokens (auto-adapts to spring/summer/autumn/winter),
     Approve/Reject actions wired to the backend.
   - **Docker:** separate `docker-compose.vidi.yml` for opt-in deploy.
+  - **⚠️ Status (this entry is honest, post-merge):** Phase 1.1
+    (Contentix-Routes) and Phase 2 (FastAPI service skeleton) are
+    live and respond to health checks, but **Phase 3 (the actual
+    discovery pipeline) is still stubbed**. Suggestions currently
+    appearing in the Vidi inbox are placeholder data from
+    `service.py` line ~308. Real Pull→Classify→Trend→Synthesize→Push
+    lives in `vidi2/src/discovery.py` but is not wired into the
+    service yet — tracked on the NixBoard backlog as card **VIDI**
+    (estimated ~1–2h of focused work).
   - **Phase 3+ (discovery pipeline, cron setup, mode 3 script
     drafting):** spec'd in `vidi2/SPEC.md`, not yet implemented.
 - **🔐 YouTube OAuth self-service setup (v0.13.1+):** Contentix now ships
