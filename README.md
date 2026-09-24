@@ -1,6 +1,6 @@
 # Contentix — YouTube Content Planner
 
-*A self-hosted Kanban + Calendar + Script editor for solo YouTube creators, with vidIQ insights baked in.*
+*A self-hosted Kanban + Calendar + Script editor for solo YouTube creators, with Youtube API/Analytics based insights baked in.*
 
 By Nix 🐧 & Dirk, 2026. Licensed under [MIT](./LICENSE).
 
