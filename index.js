@@ -239,28 +239,14 @@ async function initDB() {
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_vidi_runs_started ON vidi_runs(started_at DESC)`);
 
-  // Migration: ensure vidiq_refresh_jobs exists for existing DBs.
-// v0.10 schema lacked a DEFAULT on started_at (jobs ended up with NULL started_at)
-// and was missing current_step entirely (UI could only show "Lade Daten… (N%)").
-// Fresh DBs get the full schema; older DBs get best-effort ALTERs + a backfill.
-  db.run(`CREATE TABLE IF NOT EXISTS vidiq_refresh_jobs (
-    job_id TEXT PRIMARY KEY,
-    status TEXT DEFAULT 'pending',
-    progress INTEGER DEFAULT 0,
-    total INTEGER DEFAULT 6,
-    current_step TEXT,
-    result TEXT,
-    error TEXT,
-    started_at TEXT DEFAULT (datetime('now')),
-    finished_at TEXT
-  )`);
-  // Add missing columns to pre-v0.11 DBs. SQLite ALTER ignores DEFAULT on
-  // ADD COLUMN, so we can't backfill the started_at DEFAULT — instead we
-  // (1) always write started_at explicitly in runVidiqRefresh() and
-  // (2) backfill existing NULL rows with finished_at below.
-  try { db.run(`ALTER TABLE vidiq_refresh_jobs ADD COLUMN current_step TEXT`); } catch (e) { /* already exists */ }
-  // Pre-fill existing NULL/empty started_at with finished_at (or now) so ORDER BY works.
-  db.run(`UPDATE vidiq_refresh_jobs SET started_at = COALESCE(NULLIF(finished_at, ''), datetime('now')) WHERE started_at IS NULL OR started_at = ''`);
+  // Migration (v0.13.x): drop legacy vidIQ tables. Phase 2 (commit a61327e,
+  // 2026-09-XX) replaced vidIQ MCP with the self-hosted YouTube MCP. Fresh
+  // DBs never create vidiq_* tables; older DBs that still have them get
+  // them dropped here. Safe to run repeatedly: IF EXISTS makes this a
+  // no-op on fresh DBs.
+  db.run(`DROP TABLE IF EXISTS vidiq_cache`);
+  db.run(`DROP TABLE IF EXISTS vidiq_video_cache`);
+  db.run(`DROP TABLE IF EXISTS vidiq_refresh_jobs`);
   // Migration: research_jobs for Vidi/Nix-Research-Trigger (v0.10, 2026-06-11)
   db.run(`CREATE TABLE IF NOT EXISTS research_jobs (
     job_id TEXT PRIMARY KEY,
@@ -822,6 +808,24 @@ app.delete('/api/videos/:id', (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ─── Legacy /api/vidiq/* routes (deprecated since v0.13.x, removed 2026-10-31) ───
+// All /api/vidiq/* URLs respond with 410 Gone + a pointer to the YouTube Data
+// API equivalents. Catches any old client, bookmark, or web search result that
+// still tries the old endpoints. Real replacement routes live under
+// /api/youtube/* (see the YouTube Data API section above).
+app.all('/api/vidiq/*', (req, res) => {
+  res.set('Deprecation', 'true');
+  res.set('Sunset', '2026-10-31');
+  res.set('Link', '</api/youtube/channel-stats>; rel="successor-version"');
+  res.status(410).json({
+    error: 'vidIQ integration removed',
+    detail: 'This endpoint was removed in v0.13.x. Use /api/youtube/* instead.',
+    successor: '/api/youtube/channel-stats',
+    sunset: '2026-10-31',
+    docs: 'https://github.com/Usires/Contentix/blob/main/CHANGELOG.md',
+  });
 });
 
 // ─── Routes: vidIQ ─────────────────────────────────────────────────────────────

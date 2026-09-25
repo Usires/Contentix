@@ -137,6 +137,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scraped data from being clobbered by stale UI forms.
 
 ### Removed
+- **🗑️ vidIQ integration removed entirely** (Phase 3 vidIQ →
+  YouTube Data API migration): The legacy `/api/vidiq/*` endpoints
+  now return `410 Gone` with `Deprecation`, `Sunset: 2026-10-31`,
+  and `Link` headers pointing at `/api/youtube/*`. Replaces:
+  - `VIDIQ_API_KEY` env var (no longer read; .env.example updated
+    with deprecation note)
+  - `vidiq_cache`, `vidiq_video_cache`, `vidiq_refresh_jobs` DB
+    tables (auto-dropped by migration block on first startup after
+    upgrade; data was 11+ days stale, YouTube cache is current)
+  - 8 vidIQ route handlers (`/api/vidiq/stats`,
+    `/api/vidiq/balance-live`, `/api/vidiq/channel-stats`,
+    `/api/vidiq/watchtime`, `/api/vidiq/video/:videoId`,
+    `/api/vidiq/refresh`, `/api/vidiq/refresh/status/:jobId`,
+    `/api/vidiq/video-stats/:videoId`) — replaced by single
+    `app.all('/api/vidiq/*', …)` middleware that 410s
+  - vidIQ MCP utilities (`makeVidiqCmd`, `parseVidiqResponse`,
+    `callVidiqTool`, `vidIqCmd`) — all internal call sites were in
+    the removed routes
+  - `autoMatchVidiq()` vidIQ-cache fallback block — kept the
+    function (it's still called for YouTube-cache lookups), just
+    dropped the legacy vidIQ branch
+  - `/api/videos-with-stats` vidIQ fallback — now only consults the
+    YouTube cache; falls back to zero values for cold videos (the
+    bulk-warmup endpoint populates the cache asynchronously)
 - **🗑️ `board__column-toggle` legacy CSS** (Phase 1.2 refactor):
   magic-hex styles from the abandoned "Vidi-Lane-as-column"
   prototype. Replaced by the floating-layer pattern with tokenised

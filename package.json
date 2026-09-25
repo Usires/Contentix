@@ -1,7 +1,7 @@
 {
   "name": "contentix",
   "version": "0.13.1",
-  "description": "YouTube Content Planner with vidIQ Insights",
+  "description": "YouTube Content Planner with YouTube Data API insights",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
