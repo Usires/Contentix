@@ -52,12 +52,8 @@ const log = {
   debug: (...a) => { if (LOG_LEVEL === 'debug') { console.log(logTimestamp(), '[debug]', ...a); writeLogFile('DEBUG', a); } },
 };
 
-// vidIQ API key is optional in Phase 2 — we use YouTube Data API as primary source.
-// If VIDIQ_API_KEY is set, legacy /api/vidiq/* routes work as fallback; otherwise they return 503.
-const VIDIQ_API_KEY = process.env.VIDIQ_API_KEY || null;
-if (!VIDIQ_API_KEY) {
-  console.warn('[contentix] VIDIQ_API_KEY not set — /api/vidiq/* routes will be unavailable, use /api/youtube/* instead');
-}
+// (vidIQ removed in v0.13.x — see CHANGELOG.md. The legacy /api/vidiq/* routes
+//  return 410 Gone with a pointer to /api/youtube/*.)
 const PORT = process.env.PORT || 3038;
 const API = `http://localhost:${PORT}/api`;
 
@@ -119,20 +115,9 @@ async function initDB() {
     if (!videoCols.includes('owner')) {
       try { db.run("ALTER TABLE videos ADD COLUMN owner TEXT DEFAULT 'dirk'"); log.info('Migration: added owner column to videos'); } catch(e) { log.error('Migration videos.owner failed:', e.message); }
     }
-    db.run(`
-      CREATE TABLE IF NOT EXISTS vidiq_cache (
-        channel_id TEXT PRIMARY KEY,
-        data TEXT,
-        fetched_at TEXT
-      );
-    `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS vidiq_video_cache (
-        video_id TEXT PRIMARY KEY,
-        data TEXT,
-        fetched_at TEXT
-      );
-    `);
+    // vidiq_cache and vidiq_video_cache were removed in v0.13.x (vidIQ → YouTube
+    // Data API migration). Older DBs get them dropped by the migration block
+    // further below; fresh DBs never see them.
     db.run(`
       CREATE TABLE IF NOT EXISTS scripts (
         id TEXT PRIMARY KEY,
@@ -149,18 +134,8 @@ async function initDB() {
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP
       );
     `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS vidiq_refresh_jobs (
-        job_id TEXT PRIMARY KEY,
-        status TEXT DEFAULT 'pending',
-        progress INTEGER DEFAULT 0,
-        total INTEGER DEFAULT 6,
-        result TEXT,
-        error TEXT,
-        started_at TEXT DEFAULT (datetime('now')),
-        finished_at TEXT
-      );
-    `);
+    // vidiq_refresh_jobs was removed in v0.13.x. Older DBs get it dropped by
+    // the migration block further below; fresh DBs never see it.
     saveDB();
   }
   // YouTube Data API v3 cache tables (Phase 2 — replaces vidIQ as primary data source)
@@ -328,86 +303,17 @@ function _doSaveDB() {
   }
 }
 
-// ─── vidIQ Utilities (extracted from route handlers) ──────────────────────────
-
-function makeVidiqCmd(apiKey) {
-  return function vidIqCmd(id, name, args) {
-    const payload = JSON.stringify({jsonrpc:"2.0", id, method:"tools/call", params:{name, arguments:args}});
-    return `curl -s -X POST "https://mcp.vidiq.com/mcp" -H "Authorization: Bearer ${apiKey}" -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '${payload}'`;
-  };
-}
-
-const vidIqCmd = makeVidiqCmd(VIDIQ_API_KEY);
-
-function parseVidiqResponse(output) {
-  const match = output.match(/\[\{"type":"text","text":"([\s\S]+)"\}\]/);
-  if (!match) {
-    console.error('parseVidiq: No match. First 80:', output.slice(0, 80));
-    return null;
-  }
-  try {
-    const raw = match[1];
-    let decoded = '';
-    for (let i = 0; i < raw.length; i++) {
-      if (raw[i] === '\\' && i < raw.length - 1) {
-        const next = raw[i + 1];
-        if (next === 'n') { decoded += '\n'; i++; }
-        else if (next === '"') { decoded += '"'; i++; }
-        else if (next === '\\') { decoded += '\\'; i++; }
-        else if (next === 't') { decoded += '\t'; i++; }
-        else { decoded += raw[i]; }
-      } else {
-        decoded += raw[i];
-      }
-    }
-    let parseable = decoded;
-    while (parseable.length > 0) {
-      try { return JSON.parse(parseable); } catch (_) { parseable = parseable.slice(0, -1); }
-    }
-    return null;
-  } catch(e) { console.error('Parse error:', e.message); return null; }
-}
-
-// Convenience: call a vidIQ MCP tool via the local wrapper, then parse its
-// envelope. Returns null on parse failure or non-zero exit (callers are
-// expected to handle null gracefully — vidIQ responses are best-effort).
-// Used in the refresh pipeline and the per-video cache loop.
-function callVidiqTool(name, args, timeoutMs = 15000) {
-  // Per-tool numeric IDs used by the local MCP shim. Mirrors the IDs
-  // sprinkled through runVidiqRefresh; centralizing them here keeps the
-  // mapping in one place.
-  const TOOL_IDS = {
-    vidiq_balance: 3,
-    vidiq_channel_stats: 2,
-    vidiq_channel_videos: 4,
-    vidiq_get_videos_by_ids: 99,
-    vidiq_channel_analytics: 99,
-  };
-  const cmdId = TOOL_IDS[name];
-  if (!cmdId) {
-    console.error(`callVidiqTool: unknown tool ${name}`);
-    return null;
-  }
-  try {
-    const output = execSync(vidIqCmd(cmdId, name, args), { encoding: 'utf8', timeout: timeoutMs });
-    return parseVidiqResponse(output);
-  } catch (e) {
-    console.error(`callVidiqTool(${name}) failed:`, e.message);
-    return null;
-  }
-}
+// ─── autoMatchYTCache (post-Phase-2, post-vidiQ-removal) ──────────────────────
 
 function autoMatchVidiq(cardId, youtubeUrl, needsTitle, needsThumb) {
-  // Phase 2 refactor: VidiQ is legacy. Skip silently when no VIDIQ_API_KEY.
-  // We try YouTube cache first (Phase 2 primary), then fall back to VidiQ cache
-  // (legacy, may be populated from before Phase 2). No more sync execSync — the
-  // YouTube bulk-warmup endpoint populates the YT cache for cold videos.
-  if (!VIDIQ_API_KEY) return;
+  // v0.13.x: vidIQ removed entirely. We now only consult the YouTube cache.
+  // Cold videos get filled by the YouTube bulk-warmup endpoint; this function
+  // is a best-effort sync fill from the local cache only.
+  if (!youtubeUrl) return;
   const vidMatch = youtubeUrl.match(/(?:v=|\/youtu\.be\/)([^&\s?]+)/);
   if (!vidMatch) return;
   const vid = vidMatch[1];
   try {
-    // YouTube cache first (Phase 2 primary source)
     const ytCached = getCachedYouTubeVideo(vid);
     if (ytCached) {
       _applyThumbAndTitleToVideo(cardId, {
@@ -416,20 +322,9 @@ function autoMatchVidiq(cardId, youtubeUrl, needsTitle, needsThumb) {
       }, needsTitle, needsThumb);
       return;
     }
-    // Legacy VidiQ cache fallback (only for data populated before Phase 2)
-    const cachedRow = getAll('SELECT * FROM vidiq_video_cache WHERE video_id = ?', vid);
-    if (cachedRow.length > 0) {
-      const ageMs = (Date.now() - new Date(cachedRow[0].fetched_at).getTime()) / 1000 / 60;
-      if (ageMs < 1440) {
-        const vidiqData = JSON.parse(cachedRow[0].data);
-        _applyThumbAndTitleToVideo(cardId, {
-          title: vidiqData.title,
-          thumbnail: vidiqData.thumbnail || vidiqData.thumbnailUrl,
-        }, needsTitle, needsThumb);
-      }
-    }
-    // No sync fallback. The bulk-warmup endpoint fills the YouTube cache for new videos.
-  } catch(vqErr) { console.error('Auto-match vidIQ error:', vqErr.message); }
+    // No sync fallback to vidIQ cache (table dropped). The bulk-warmup endpoint
+    // populates the YouTube cache asynchronously for new videos.
+  } catch (err) { console.error('Auto-match YouTube cache error:', err.message); }
 }
 
 // Helper extracted from autoMatchVidiq — keeps title/thumbnail update logic in one place
@@ -627,18 +522,9 @@ app.get('/api/videos-with-stats', async (req, res) => {
     for (const v of videos) {
       const parsed = { ...v, tags: v.tags ? JSON.parse(v.tags) : [] };
       
-      // Try to get vidIQ stats
+      // Try to get YouTube cache stats (vidIQ removed in v0.13.x)
       if (v.video_id) {
         try {
-          const cached = getAll('SELECT * FROM vidiq_video_cache WHERE video_id = ?', v.video_id);
-          let vidiqData = null;
-          if (cached.length > 0) {
-            const ageMs = (Date.now() - new Date(cached[0].fetched_at).getTime()) / 1000 / 60;
-            if (ageMs < 1440) vidiqData = JSON.parse(cached[0].data);
-          }
-          // Phase 2: prefer YouTube Data API cache over legacy vidIQ cache
-          // (vidIQ still works as fallback during transition, but YouTube has
-          // higher data quality: publishedAt, duration, thumbnails).
           let ytCached = null;
           try { ytCached = getCachedYouTubeVideo(v.video_id); } catch(e) {}
 
@@ -649,13 +535,6 @@ app.get('/api/videos-with-stats', async (req, res) => {
             parsed.duration = ytCached.duration || null;
             parsed.commentCount = ytCached.comments || ytCached.commentCount || 0;
             parsed.thumbnail = ytCached.thumbnail || null;
-          } else if (vidiqData) {
-            parsed.views = vidiqData.viewCount || 0;
-            parsed.likes = vidiqData.likeCount || 0;
-            parsed.publishedAt = vidiqData.publishedAt || null;
-            parsed.duration = vidiqData.duration || null;
-            parsed.commentCount = vidiqData.commentCount || 0;
-            parsed.thumbnail = null;
           } else {
             parsed.views = 0;
             parsed.likes = 0;
@@ -830,21 +709,6 @@ app.all('/api/vidiq/*', (req, res) => {
 
 // ─── Routes: vidIQ ─────────────────────────────────────────────────────────────
 
-app.get('/api/vidiq/stats', (req, res) => {
-  try {
-    const rows = getAll('SELECT * FROM vidiq_cache WHERE channel_id = ?', 'UC-YmLEIgdESaoVN3ZKNT_QA');
-    if (rows.length > 0) {
-      const data = JSON.parse(rows[0].data);
-      const age = rows[0].fetched_at;
-      const ageMs = (Date.now() - new Date(age).getTime()) / 1000 / 60;
-      res.json({ ...data, cached: true, age: `${Math.round(ageMs)} minutes ago`, fresh: ageMs < 60 });
-    } else {
-      res.json({ stats: {}, balance: {}, channelId: 'UC-YmLEIgdESaoVN3ZKNT_QA', cached: false });
-    }
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
 
 // GET /api/vidiq/balance-live → live credit balance from vidIQ MCP, no cache read.
 // `vidiq_balance` is a tool read (current docs: 0 credits per call on this account;
@@ -856,76 +720,8 @@ app.get('/api/vidiq/stats', (req, res) => {
 // and bails if `balance.total ≤ 0`. If the cached balance blob is empty/{} or
 // otherwise stale (the "0-Credit-Loop"), this route is the way out: it forces
 // a fresh read and self-heals the cache for the next refresh.
-app.get('/api/vidiq/balance-live', async (req, res) => {
-  const CHANNEL_ID = 'UC-YmLEIgdESaoVN3ZKNT_QA';
-  try {
-    const output = execSync(vidIqCmd(3, 'vidiq_balance', {}), { encoding: 'utf8', timeout: 15000 });
-    const parsed = parseVidiqResponse(output);
-    if (!parsed || typeof parsed !== 'object') {
-      log.error('[vidIQ] balance-live: parse failed');
-      res.status(502).json({ error: 'vidIQ balance parse failed', raw: output.slice(0, 200) });
-      return;
-    }
-    // Normalize: response may wrap the balance payload in different shapes
-    // (bare balance object, or { balance: {...} }, or { type, totalCredits, ... }).
-    const balance = parsed.balance && typeof parsed.balance === 'object' ? parsed.balance : parsed;
-
-    // Guard against clobbering good data with parse-fail objects. vidIQ
-    // outage returns JSON envelopes that parse to `{result:{content:[...]}}`
-    // or similar; after normalization they have no numeric balance fields
-    // and are not safe to write into the cache.
-    function isValidBalance(b) {
-      return b && typeof b === 'object' && (
-        typeof b.renewableCredits === 'number' ||
-        typeof b.addOnCredits === 'number' ||
-        typeof b.maxRenewableCredits === 'number'
-      );
-    }
-    if (!isValidBalance(balance)) {
-      log.warn(`[vidIQ] balance-live: ungültiges Objekt erhalten — kein Cache-Update. Wert: ${JSON.stringify(balance)}`);
-      res.status(502).json({ error: 'vidIQ balance missing credit fields', received: balance, healed: false });
-      return;
-    }
-
-    // Self-heal: merge into existing cache blob so /api/vidiq/stats picks it up.
-    const existingRows = getAll('SELECT data FROM vidiq_cache WHERE channel_id = ?', CHANNEL_ID);
-    const merged = existingRows.length > 0 ? JSON.parse(existingRows[0].data) : {};
-    merged.balance = balance;
-    merged.channelId = CHANNEL_ID;
-    run('INSERT OR REPLACE INTO vidiq_cache (channel_id, data, fetched_at) VALUES (?, ?, datetime("now"))', CHANNEL_ID, JSON.stringify(merged));
-    saveDB();
-
-    res.json({ balance, healed: true });
-  } catch (e) {
-    log.error('[vidIQ] balance-live error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
 
 // GET /api/vidiq/channel-stats → subs, views, watchtimeHours, videoCount + latest video
-app.get('/api/vidiq/channel-stats', (req, res) => {
-  try {
-    const rows = getAll('SELECT * FROM vidiq_cache WHERE channel_id = ?', 'UC-YmLEIgdESaoVN3ZKNT_QA');
-    if (rows.length === 0) {
-      res.json({ subs: 0, views: 0, watchtimeHours: 0, videoCount: 0, latestVideo: null, cached: false });
-      return;
-    }
-    const data = JSON.parse(rows[0].data);
-    const s = data.stats?.currentStats || data.stats || {};
-    const fetchedAt = rows[0].fetched_at; // ISO timestamp from DB
-    res.json({
-      subs: s.subscribers || 0,
-      views: s.views || 0,
-      watchtimeHours: s.watchtimeHours || 0,  // nicht direkt von vidIQ geliefert
-      videoCount: s.videos || 0,
-      latestVideo: data.latestVideo || null,
-      cached: true,
-      _fetched_at: fetchedAt || null
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
 
 // GET /api/vidiq/watchtime → estimated watch time (minutes → hours), cached 6h.
 // Costs 5 vidIQ credits on a cache miss; cache hit is free.
@@ -954,63 +750,77 @@ function saveYTSettings() {
   saveDB();
 }
 
-// --- YouTube cache helpers
-function getCachedYouTubeChannel(channelId) {
-  const ttlMs = YT_CACHE_SETTINGS.channelTtlHours * 60 * 60 * 1000;
-  const rows = getAll('SELECT data, fetched_at FROM youtube_cache WHERE channel_id = ?', channelId);
+// --- Generic cache helper (REFA-Punkt 1: dedup of channel/video/analytics patterns)
+// Reads a row by key, parses the JSON blob, returns null if missing or stale.
+function getCached({ table, keyCol, keyVal, ttlMs }) {
+  const rows = getAll(
+    `SELECT data, fetched_at FROM ${table} WHERE ${keyCol} = ?`,
+    keyVal
+  );
   if (rows.length === 0) return null;
   const ageMs = Date.now() - new Date(rows[0].fetched_at + 'Z').getTime();
   if (ageMs > ttlMs) return null;
-  return JSON.parse(rows[0].data);
+  try { return JSON.parse(rows[0].data); }
+  catch (e) { return null; }
+}
+
+// Upserts a JSON blob at (table, keyCol, keyVal). Caller passes the parsed object.
+function saveCached({ table, keyCol, keyVal, data }) {
+  run(
+    `INSERT OR REPLACE INTO ${table} (${keyCol}, data, fetched_at) VALUES (?, ?, datetime("now"))`,
+    keyVal, JSON.stringify(data)
+  );
+  saveDB();
+}
+
+// --- YouTube cache helpers (thin wrappers over getCached/saveCached)
+function getCachedYouTubeChannel(channelId) {
+  return getCached({
+    table: 'youtube_cache',
+    keyCol: 'channel_id',
+    keyVal: channelId,
+    ttlMs: YT_CACHE_SETTINGS.channelTtlHours * 60 * 60 * 1000,
+  });
 }
 
 function saveCachedYouTubeChannel(channelId, data) {
-  run('INSERT OR REPLACE INTO youtube_cache (channel_id, data, fetched_at) VALUES (?, ?, datetime("now"))',
-      channelId, JSON.stringify(data));
-  saveDB();
+  saveCached({ table: 'youtube_cache', keyCol: 'channel_id', keyVal: channelId, data });
 }
 
 function getCachedYouTubeVideo(videoId) {
-  const ttlMs = YT_CACHE_SETTINGS.videoTtlHours * 60 * 60 * 1000;
-  const rows = getAll('SELECT data, fetched_at FROM youtube_video_cache WHERE video_id = ?', videoId);
-  if (rows.length === 0) return null;
-  const ageMs = Date.now() - new Date(rows[0].fetched_at + 'Z').getTime();
-  if (ageMs > ttlMs) return null;
-  return JSON.parse(rows[0].data);
+  return getCached({
+    table: 'youtube_video_cache',
+    keyCol: 'video_id',
+    keyVal: videoId,
+    ttlMs: YT_CACHE_SETTINGS.videoTtlHours * 60 * 60 * 1000,
+  });
 }
 
 function saveCachedYouTubeVideo(videoId, data) {
-  run('INSERT OR REPLACE INTO youtube_video_cache (video_id, data, fetched_at) VALUES (?, ?, datetime("now"))',
-      videoId, JSON.stringify(data));
-  saveDB();
+  saveCached({ table: 'youtube_video_cache', keyCol: 'video_id', keyVal: videoId, data });
 }
 
+// Analytics is special: it lives inside the channel cache under `_analytics`.
+// This is a side-effect of OAuth-token-resolved analytics being scoped to the
+// channel while still benefiting from the youtube_cache TTL. We keep the
+// savedAt inside the JSON blob so callers can introspect freshness.
 function getCachedYouTubeAnalytics(channelId) {
-  const ttlMs = YT_CACHE_SETTINGS.analyticsTtlHours * 60 * 60 * 1000;
-  const rows = getAll('SELECT data, fetched_at FROM youtube_cache WHERE channel_id = ?', channelId);
-  if (rows.length === 0) return null;
-  try {
-    const data = JSON.parse(rows[0].data);
-    if (!data._analytics) return null;
-    const savedAt = data._analytics.savedAt || rows[0].fetched_at;
-    const ageMs = Date.now() - new Date(savedAt + 'Z').getTime();
-    if (ageMs > ttlMs) return null;
-    return data._analytics;
-  } catch (e) { return null; }
+  const cached = getCached({
+    table: 'youtube_cache',
+    keyCol: 'channel_id',
+    keyVal: channelId,
+    ttlMs: YT_CACHE_SETTINGS.analyticsTtlHours * 60 * 60 * 1000,
+  });
+  if (!cached || !cached._analytics) return null;
+  return cached._analytics;
 }
 
 function saveCachedYouTubeAnalytics(channelId, analytics) {
+  // Merge with existing channel cache so we don't clobber _channel data.
   const rows = getAll('SELECT data FROM youtube_cache WHERE channel_id = ?', channelId);
   const existing = rows.length > 0 ? JSON.parse(rows[0].data) : {};
   existing._analytics = Object.assign({}, analytics, { savedAt: new Date().toISOString() });
-  if (rows.length > 0) {
-    run('UPDATE youtube_cache SET data = ?, fetched_at = ? WHERE channel_id = ?',
-        JSON.stringify(existing), new Date().toISOString(), channelId);
-  } else {
-    run('INSERT INTO youtube_cache (channel_id, data, fetched_at) VALUES (?, ?, ?)',
-        channelId, JSON.stringify(existing), new Date().toISOString());
-  }
-  saveDB();
+  saveCached({ table: 'youtube_cache', keyCol: 'channel_id', keyVal: channelId, data: existing });
 }
 
 const YT_CHANNEL_ID_FOR_STATS = 'UC-YmLEIgdESaoVN3ZKNT_QA';
@@ -1618,306 +1428,17 @@ async function runYouTubeRefresh(jobId, channelId, signal) {
 // --- vidIQ watchtime block follows below
 
 // (vidIQ watchtime helpers removed in Phase 2 refactor — use /api/youtube/analytics instead)
-app.get('/api/vidiq/watchtime', async (req, res) => {
-  const channelId = CHANNEL_ID_FOR_WATCHTIME;
-  const cached = getCachedWatchtime(channelId);
-  if (cached && cached.fresh) {
-    res.json({
-      minutes: cached.minutes,
-      hours: Math.round(cached.minutes / 60),
-      avgViewPercentage: cached.avgViewPercentage,
-      windowDays: 28,
-      cached: true,
-      fetchedAt: cached.fetchedAt,
-      ageHours: Math.round(cached.ageHours * 10) / 10,
-    });
-    return;
-  }
-  try {
-    const { minutes, avgViewPercentage } = await fetchWatchtimeFromVidiq(channelId);
-    saveWatchtime(channelId, minutes, avgViewPercentage);
-    res.json({
-      minutes,
-      hours: Math.round(minutes / 60),
-      avgViewPercentage,
-      windowDays: 28,
-      cached: false,
-      fetchedAt: new Date().toISOString(),
-      ageHours: 0,
-    });
-  } catch (e) {
-    log.error('vidiq watchtime fetch error:', e.message);
-    res.status(500).json({ error: e.message, cached: false });
-  }
-});
 
 // GET /api/vidiq/video/:videoId → title + thumbnail_url (cached)
-app.get('/api/vidiq/video/:videoId', async (req, res) => {
-  const { videoId } = req.params;
-  const { video_id } = req.query;
-  // Allow videoId as query param for proxy use
-  const vid = video_id || videoId;
-  if (!vid) { res.status(400).json({ error: 'videoId required' }); return; }
-
-  try {
-    // Check cache first
-    const cached = getAll('SELECT * FROM vidiq_video_cache WHERE video_id = ?', vid);
-    if (cached.length > 0) {
-      const ageMs = (Date.now() - new Date(cached[0].fetched_at).getTime()) / 1000 / 60;
-      if (ageMs < 1440) { // cache max 24h
-        res.json({ ...JSON.parse(cached[0].data), cached: true, age: `${Math.round(ageMs)} minutes ago` });
-        return;
-      }
-    }
-
-    // Fetch from vidIQ MCP
-    const output = execSync(vidIqCmd(1, 'vidiq_get_videos_by_ids', { videoIds: [vid] }), { encoding: 'utf8', timeout: 15000 });
-    let cleanData = parseVidiqResponse(output);
-    if (!cleanData) { res.status(404).json({ error: 'Keine Daten von vidIQ' }); return; }
-    const videoData = cleanData.videos && cleanData.videos[0] ? cleanData.videos[0] : (Array.isArray(cleanData) ? cleanData[0] : cleanData);
-    if (!videoData || !videoData.title) { res.status(404).json({ error: 'Video nicht gefunden' }); return; }
-
-    const result = {
-      title: videoData.title || '',
-      thumbnail_url: videoData.thumbnail || videoData.thumbnailUrl || '',
-      videoId: vid
-    };
-
-    // Cache it
-    run('INSERT OR REPLACE INTO vidiq_video_cache (video_id, data, fetched_at) VALUES (?, ?, datetime("now"))', vid, JSON.stringify(result));
-    saveDB();
-    res.json({ ...result, cached: false });
-  } catch (error) {
-    console.error('vidIQ video fetch error:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
 
 // ─── vidIQ Background Refresh ─────────────────────────────────────────────────
 
 const TOTAL_REFRESH_STEPS = 6; // init + stats + balance + long + short + watchtime
 
-async function runVidiqRefresh(jobId) {
-  log.info('[vidIQ] runVidiqRefresh gestartet, jobId:', jobId);
-  const CHANNEL_ID = 'UC-YmLEIgdESaoVN3ZKNT_QA';
-
-  function updateProgress(step, label) {
-    if (label) {
-      run('UPDATE vidiq_refresh_jobs SET progress = ?, current_step = ? WHERE job_id = ?', step, label, jobId);
-    } else {
-      run('UPDATE vidiq_refresh_jobs SET progress = ? WHERE job_id = ?', step, jobId);
-    }
-    saveDB();
-  }
-
-  try {
-    // Step 1: Initialize (MCP handshake, 0 credits)
-    updateProgress(1, '🔌 Verbindung zu vidIQ wird aufgebaut…');
-    execSync(vidIqCmd(1, 'initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'contentix', version: '1.0' } }), { encoding: 'utf8', timeout: 10000 });
-    updateProgress(1, '✓ Verbindung zu vidIQ aufgebaut');
-
-    // Step 2: Stats
-    updateProgress(2, '📊 Kanal-Statistiken werden geladen…');
-    const stats = callVidiqTool('vidiq_channel_stats', { channelId: CHANNEL_ID }) || {};
-    updateProgress(2, '✓ Kanal-Statistiken geladen');
-
-    // Step 3: Balance
-    updateProgress(3, '💳 Credit-Stand wird abgefragt…');
-    const balance = callVidiqTool('vidiq_balance', {}) || {};
-    updateProgress(3, '✓ Credit-Stand geladen');
-
-    // Step 4: Long videos
-    updateProgress(4, '🎬 Long-Videos werden geladen…');
-    const longParsed = callVidiqTool('vidiq_channel_videos', { channelId: CHANNEL_ID, videoFormat: 'long', popular: false });
-    updateProgress(4, '✓ Long-Videos geladen');
-
-    // Step 5: Short videos
-    updateProgress(5, '📱 Shorts werden geladen…');
-    const shortParsed = callVidiqTool('vidiq_channel_videos', { channelId: CHANNEL_ID, videoFormat: 'short', popular: false });
-    updateProgress(5, '✓ Shorts geladen');
-
-    // Step 6: Watchtime (28-day rolling window, 5 vidIQ credits).
-    // Errors are non-fatal — we don't want a watchtime hiccup to fail the
-    // whole refresh; sidebar will just show "—" until the next attempt.
-    updateProgress(6, '⏱️  Watchtime wird geladen… (5 Credits)');
-    try {
-      const { minutes, avgViewPercentage } = await fetchWatchtimeFromVidiq(CHANNEL_ID);
-      saveWatchtime(CHANNEL_ID, minutes, avgViewPercentage);
-      log.info(`[vidIQ] Watchtime geladen: ${minutes} Min (${avgViewPercentage}% avg view)`);
-      updateProgress(6, '✓ Watchtime geladen');
-    } catch (wtErr) {
-      log.error('[vidIQ] Watchtime refresh fehlgeschlagen (nicht-fatal):', wtErr.message);
-      updateProgress(6, '⚠ Watchtime fehlgeschlagen (Rest lief weiter)');
-    }
-
-    // `stats` and `balance` are already parsed objects from callVidiqTool above.
-// (callVidiqTool returns null on parse failure, defaulted to {} via ||.)
-
-let videosImported = 0;
-for (const fmt of ['long', 'short']) {
-      const parsed = fmt === 'long' ? longParsed : shortParsed;
-      if (parsed && parsed.videos) {
-        for (const v of parsed.videos) {
-          try {
-            const existing = getAll('SELECT id FROM videos WHERE video_id = ?', v.videoId);
-            const publishedAt = v.publishedAt ? new Date(v.publishedAt).toISOString() : null;
-            const videoFormat = fmt === 'short' ? 'shorts' : 'longform';
-            if (existing.length === 0) {
-              const id = require('crypto').randomUUID();
-              const now = new Date().toISOString();
-              run(`INSERT INTO videos (id, title, status, video_format, planned_date, published_date, video_id, youtube_url, tags, thumbnail_url, created_at, updated_at) VALUES (?, ?, 'published', ?, ?, ?, ?, ?, '[]', ?, ?, ?)`,
-                id, v.title, videoFormat, publishedAt, publishedAt, v.videoId, `https://youtube.com/watch?v=${v.videoId}`, v.thumbnail || '', now, now);
-              videosImported++;
-            }
-          } catch(e) { /* skip duplicates */ }
-        }
-      }
-    }
-
-    // Find latest video from long videos
-    let latestVideo = null;
-    // longParsed was already populated by callVidiqTool in Step 4.
-    if (longParsed && longParsed.videos && longParsed.videos.length > 0) {
-      const sorted = [...longParsed.videos].sort((a, b) => {
-        const da = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
-        const db = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
-        return db - da;
-      });
-      const lv = sorted[0];
-      latestVideo = {
-        title: lv.title || '',
-        videoId: lv.videoId || '',
-        thumbnail: lv.thumbnail || '',
-        publishedAt: lv.publishedAt || null
-      };
-    }
-
-    // Merge with any existing data so we don't clobber sidecar keys like
-    // `_watchtime` (written by Step 6 of the refresh).
-    //
-    // `isValidBalance()`: vidIQ sometimes returns a parseable JSON envelope
-    // where the actual balance fields are missing (e.g. temporary API outage
-    // returns `{result:{...error...}}` and parseVidiqResponse yields `null`,
-    // which defaulted to `{}`). Writing `{}` to the cache would clobber a
-    // previously-good balance with an empty object and strand the UI on
-    // "— nicht verfügbar" until a future refresh succeeds. To avoid that,
-    // we only overwrite the cached balance when the new value has at least
-    // one numeric credit field.
-    function isValidBalance(b) {
-      return b && typeof b === 'object' && (
-        typeof b.renewableCredits === 'number' ||
-        typeof b.addOnCredits === 'number' ||
-        typeof b.maxRenewableCredits === 'number'
-      );
-    }
-    const existingRows = getAll('SELECT data FROM vidiq_cache WHERE channel_id = ?', CHANNEL_ID);
-    const merged = existingRows.length > 0 ? JSON.parse(existingRows[0].data) : {};
-    merged.stats = stats;
-    if (isValidBalance(balance)) {
-      merged.balance = balance;
-    } else {
-      log.warn(`[vidIQ] Step 3 (balance) lieferte ungültiges/parse-fail-Objekt — altes balance behalten. Wert: ${JSON.stringify(balance)}`);
-    }
-    merged.channelId = CHANNEL_ID;
-    merged.latestVideo = latestVideo;
-    run('INSERT OR REPLACE INTO vidiq_cache (channel_id, data, fetched_at) VALUES (?, ?, datetime("now"))', CHANNEL_ID, JSON.stringify(merged));
-    saveDB();
-
-    // Per-video cache: count total first, then process
-    const allVideos = getAll('SELECT video_id FROM videos WHERE video_id IS NOT NULL');
-    const totalVideos = allVideos.length;
-    run('UPDATE vidiq_refresh_jobs SET total = ? WHERE job_id = ?', TOTAL_REFRESH_STEPS + totalVideos, jobId);
-    saveDB();
-
-    let cachedCount = 0;
-    for (const { video_id: vid } of allVideos) {
-      if (!vid) continue;
-      const cached = getAll('SELECT fetched_at FROM vidiq_video_cache WHERE video_id = ?', vid);
-      if (cached.length > 0) {
-        const ageMs = (Date.now() - new Date(cached[0].fetched_at).getTime()) / 1000 / 60;
-        if (ageMs < 60) { cachedCount++; continue; }
-      }
-      updateProgress(TOTAL_REFRESH_STEPS + cachedCount, `🔄 Video ${cachedCount + 1}/${totalVideos} wird geladen… (1 Credit)`);
-      try {
-        const parsed = callVidiqTool('vidiq_get_videos_by_ids', { videoIds: [vid] });
-        if (parsed && parsed.videos && parsed.videos[0]) {
-          const vd = parsed.videos[0];
-          run('INSERT OR REPLACE INTO vidiq_video_cache (video_id, data, fetched_at) VALUES (?, ?, datetime("now"))', vid, JSON.stringify(vd));
-        }
-      } catch(e) { /* skip individual failures */ }
-      cachedCount++;
-      updateProgress(TOTAL_REFRESH_STEPS + cachedCount, `✓ Video ${cachedCount}/${totalVideos} geladen`);
-    }
-    saveDB();
-
-    // Done
-    run('UPDATE vidiq_refresh_jobs SET status = ?, finished_at = datetime("now"), result = ? WHERE job_id = ?', 'done', JSON.stringify({ ...merged, videosImported }), jobId);
-    saveDB();
-
-  } catch (error) {
-    console.error('vidIQ refresh error:', error.message);
-    run('UPDATE vidiq_refresh_jobs SET status = ?, error = ?, finished_at = datetime("now") WHERE job_id = ?', 'error', error.message, jobId);
-    saveDB();
-  }
-}
-
 // ─── Routes: vidIQ ─────────────────────────────────────────────────────────────
 
-app.post('/api/vidiq/refresh', (req, res) => {
-  log.info('[vidIQ] Refresh gestartet');
-  const { randomUUID } = require('crypto');
-  const jobId = require('crypto').randomUUID();
-  const CHANNEL_ID = 'UC-YmLEIgdESaoVN3ZKNT_QA';
 
-  try {
-    // Create job record. started_at is set explicitly because pre-v0.11 DBs
-    // don't have a column DEFAULT — null started_at breaks ORDER BY.
-    run('INSERT INTO vidiq_refresh_jobs (job_id, status, progress, total, current_step, started_at) VALUES (?, ?, 0, ?, ?, datetime(\"now\"))', jobId, 'running', TOTAL_REFRESH_STEPS, '🚀 Refresh wird vorbereitet…');
-    saveDB();
-    log.info('[vidIQ] Job erstellt:', jobId);
 
-    // Respond immediately
-    res.json({ jobId, status: 'running', message: 'Refresh gestartet' });
-    log.info('[vidIQ] Response gesendet');
-
-    // Run in background (fire-and-forget)
-    setImmediate(() => { log.info('[vidIQ] Background Job startet'); runVidiqRefresh(jobId); });
-  } catch(e) {
-    log.error('[vidIQ] POST handler error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.get('/api/vidiq/refresh/status/:jobId', (req, res) => {
-  const { jobId } = req.params;
-  log.info('[vidIQ] Status poll:', jobId);
-  const job = get('SELECT * FROM vidiq_refresh_jobs WHERE job_id = ?', jobId);
-  if (!job) { res.status(404).json({ error: 'Job nicht gefunden' }); return; }
-  res.json({
-    jobId: job.job_id,
-    status: job.status,
-    progress: job.progress,
-    total: job.total,
-    currentStep: job.current_step,  // human-readable label for UI
-    error: job.error,
-    started_at: job.started_at,
-    finished_at: job.finished_at,
-    result: job.result ? JSON.parse(job.result) : null
-  });
-});
-
-app.post('/api/vidiq/video-stats/:videoId', (req, res) => {
-  const { videoId } = req.params;
-
-  try {
-    const output = execSync(vidIqCmd(1, 'vidiq_get_videos_by_ids', { videoIds: [videoId] }), { encoding: 'utf8', timeout: 15000 });
-    const data = parseVidiqResponse(output);
-    if (!data) { res.status(404).json({ error: 'No data found' }); return; }
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
 // ─── Version ──────────────────────────────────────────────────────────────────
 
